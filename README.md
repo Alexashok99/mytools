@@ -37,12 +37,12 @@ pip install mytools
 
 ### **Install from GitHub**
 ```bash
-pip install git+https://github.com/yourusername/mytools.git
+pip install git+https://github.com/Alexashok99/mytools.git
 ```
 
 ### **Development Installation**
 ```bash
-git clone https://github.com/yourusername/mytools.git
+git clone https://github.com/Alexashok99/mytools.git
 cd mytools
 pip install -e .
 ```
@@ -208,7 +208,7 @@ export MYTOOLS_LOG_LEVEL=DEBUG
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/mytools.git
+git clone https://github.com/Alexashok99/mytools.git
 cd mytools
 
 # Create virtual environment
@@ -300,9 +300,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 👨‍💻 Author
 
 **Your Name**
-- GitHub: [@yourusername](https://github.com/yourusername)
-- Twitter: [@yourtwitter](https://twitter.com/yourtwitter)
-- Email: your.email@example.com
+- GitHub: [@Alexashok99](https://github.com/Alexashok99)
+- Email: alexashok999@gmail.com
 
 ---
 
