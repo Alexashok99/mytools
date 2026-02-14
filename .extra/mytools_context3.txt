@@ -1,0 +1,3058 @@
+🤖 PROJECT CONTEXT FOR AI ASSISTANCE
+============================================================
+PROJECT: mytools
+SELECTION MODE: SMART
+GENERATED: 2026-02-14 19:26:54
+============================================================
+
+📁 PROJECT STRUCTURE:
+Project Tree:
+├── 📁 src
+│   └── 📁 mytools
+│       ├── 📁 plugins
+│       │   └── 📄 __init__.py
+│       ├── 📁 tools
+│       │   ├── 📄 __init__.py
+│       │   ├── 📄 base.py
+│       │   ├── 📄 clean_pycache.py
+│       │   ├── 📄 context_generator.py
+│       │   ├── 📄 django_manager.py
+│       │   ├── 📄 env_manager.py
+│       │   ├── 📄 file_counter.py
+│       │   └── 📄 file_ops.py
+│       ├── 📄 __init__.py
+│       ├── 📄 __main__.py
+│       ├── 📄 cli.py
+│       ├── 📄 config.py
+│       └── 📄 utils.py
+├── 📁 tests
+│   ├── 📁 test_tools
+│   │   ├── 📄 test_clean_pycache.py
+│   │   ├── 📄 test_context_generator.py
+│   │   ├── 📄 test_django_manager.py
+│   │   ├── 📄 test_env_manager.py
+│   │   ├── 📄 test_file_counter.py
+│   │   └── 📄 test_file_ops.py
+│   ├── 📄 __init__.py
+│   ├── 📄 conftest.py
+│   └── 📄 test_cli.py
+├── 📄 LICENSE
+├── 📄 pyproject.toml
+└── 📄 README.md
+
+
+============================================================
+📝 FILE CONTENTS:
+
+============================================================
+📄 FILE: pyproject.toml
+============================================================
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mytools"
+version = "0.2.0"
+description = "Modular CLI Tool Suite for Python developers"
+readme = "README.md"
+authors = [
+    {name = "Your Name", email = "you@example.com"},
+]
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+]
+dependencies = [
+    "typer[all]>=0.12",
+    "pydantic>=2.5",
+    "pydantic-settings>=2.1",
+    "python-dotenv>=1.0",
+    "rich>=13.7",          # beautiful console output
+    "importlib-metadata; python_version<'3.8'",
+    "pyperclip>=1.8",
+]
+requires-python = ">=3.9"
+
+[project.scripts]
+mytools = "mytools.cli:app"
+
+[project.entry-points."mytools.plugins"]
+clean-pycache = "mytools.tools.clean_pycache:CleanPycacheTool"
+django = "mytools.tools.django_manager:DjangoTool"
+env = "mytools.tools.env_manager:EnvTool"
+file-ops = "mytools.tools.file_ops:FileOperationsTool"
+file-counter = "mytools.tools.file_counter:FileCounterTool"
+context = "mytools.tools.context_generator:FullContextTool"
+
+# === Naye Django Shortcuts ===
+dj-run = "mytools.tools.django_manager:DjRunTool"
+dj-migrate = "mytools.tools.django_manager:DjMigrateTool"
+dj-makemigrations = "mytools.tools.django_manager:DjMakeMigrationsTool"
+dj-app = "mytools.tools.django_manager:DjAppTool"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mytools*"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers"
+testpaths = [
+    "tests",
+]
+
+============================================================
+📄 FILE: src\mytools\cli.py
+============================================================
+# cli.py
+
+"""Main CLI application using Typer."""
+import typer
+from typing import Optional
+from importlib.metadata import entry_points
+import sys
+
+from .utils import setup_logging, logger
+from .config import settings
+
+app = typer.Typer(
+    name="mytools",
+    help="🛠️ MyTools – Developer's Swiss Army Knife",
+    add_completion=False,
+    rich_markup_mode="rich",
+)
+
+# Global callback for options that apply to all commands
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
+    log_level: Optional[str] = typer.Option(
+        None,
+        "--log-level",
+        "-l",
+        help="Set log level (DEBUG, INFO, WARNING, ERROR)",
+    ),
+):
+    """Common options applied before running any command."""
+    # configure logging early so downstream code respects level
+    if debug:
+        settings.log_level = "DEBUG"
+    elif log_level:
+        settings.log_level = log_level.upper()
+
+    # re-configure logger with new level
+    setup_logging()
+
+    # if no subcommand supplied, show help
+    if ctx.invoked_subcommand is None:
+        typer.echo(app.get_help())
+        raise typer.Exit()
+
+
+# ----------------------------------------------------------------------
+# Plugin: Dynamically load all tools from entry_points
+# ----------------------------------------------------------------------
+def load_plugins():
+    """Load all tools registered under 'mytools.plugins' entry point."""
+    plugins = {}
+    eps = entry_points()
+    # Python 3.10+ uses select(), older uses dict interface
+    if hasattr(eps, "select"):
+        group = eps.select(group="mytools.plugins")
+    else:
+        group = eps.get("mytools.plugins", [])
+    for ep in group:
+        try:
+            tool_class = ep.load()
+            plugins[ep.name] = tool_class
+            logger.debug(f"Loaded plugin: {ep.name} -> {tool_class}")
+        except Exception as e:
+            logger.error(f"Failed to load plugin {ep.name}: {e}")
+    return plugins
+
+_plugins = load_plugins()
+
+# ----------------------------------------------------------------------
+# Register each plugin as a Typer subcommand
+# ----------------------------------------------------------------------
+for name, tool_class in _plugins.items():
+    # Instantiate tool once (or you can lazy-load inside command)
+    tool_instance = tool_class()
+
+    # register the `run` method directly; a bound method's signature
+    # excludes `self` so Typer can pick up any additional options defined
+    # there.  We still supply the description as help text.
+    app.command(name=name, help=tool_instance.description)(tool_instance.run)
+
+# ----------------------------------------------------------------------
+# Built‑in commands that don't need a plugin
+# ----------------------------------------------------------------------
+@app.command("list")
+def list_tools():
+    """📋 List all available tools with brief descriptions."""
+    typer.echo("🔧 Available tools:\n")
+    for name, tool_class in _plugins.items():
+        desc = tool_class().description
+        typer.echo(f"  • {name} – {desc}")
+    typer.echo("\nUse `mytools <tool-name>` to run a tool.")
+
+@app.command("info")
+def info():
+    """ℹ️  Show system information."""
+    typer.echo(f"MyTools version: {__import__('mytools').__version__}")
+    typer.echo(f"Python: {sys.version}")
+    typer.echo(f"Config file: {settings.config_file or 'default'}")
+
+# ----------------------------------------------------------------------
+# If no command given, show help
+# ----------------------------------------------------------------------
+def main():
+    if len(sys.argv) == 1:
+        typer.echo(app.get_help())
+    else:
+        app()
+
+if __name__ == "__main__":
+    main()
+
+============================================================
+📄 FILE: src\mytools\config.py
+============================================================
+"""Configuration management with pydantic-settings."""
+from pathlib import Path
+from typing import Set, Optional, List
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment and .env file."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="MYTOOLS_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # Ignore directories (defaults + user additions)
+    ignore_dirs: Set[str] = Field(
+        default_factory=lambda: {
+            ".git", ".venv", "venv", "env", "__pycache__",
+            ".idea", ".vscode", "node_modules", "dist", "build",
+            "migrations", "logs", ".pytest_cache", ".mypy_cache",
+        }
+    )
+
+    # Ignore file patterns (supports wildcards via fnmatch)
+    ignore_files: Set[str] = Field(
+        default_factory=lambda: {
+            ".DS_Store", "Thumbs.db", "*.pyc", "*.pyo", "*.pyd",
+            "*.log", "*.tmp", ".env", ".env.*", "*.db", "*.sqlite3",
+        }
+    )
+
+    # Maximum file size to read when generating context (in bytes)
+    max_file_size: int = 100_000  # 100 KB
+
+    # Maximum total size of context output (in bytes)
+    max_total_size: int = 500_000  # 500 KB
+
+    # Log level (DEBUG, INFO, WARNING, ERROR)
+    log_level: str = "INFO"
+
+    # Optional path to user config file (TOML/YAML)
+    config_file: Optional[Path] = None
+
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        v = v.upper()
+        if v not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            return "INFO"
+        return v
+
+# Global settings instance
+settings = Settings()
+
+# Allow runtime updates (e.g., adding ignore dirs)
+def add_ignore_dir(directory: str) -> None:
+    settings.ignore_dirs.add(directory)
+
+def add_ignore_file(pattern: str) -> None:
+    settings.ignore_files.add(pattern)
+
+============================================================
+📄 FILE: src\mytools\utils.py
+============================================================
+"""Utility functions and logging setup."""
+import os
+import sys
+import logging
+from pathlib import Path
+from typing import Union
+from rich.console import Console
+from rich.logging import RichHandler
+from .config import settings
+
+console = Console()
+
+def setup_logging():
+    """Configure logging with Rich handler.
+
+    Calling this multiple times will reconfigure the root logger.  ``basicConfig``
+    only has an effect once unless ``force=True`` (Python 3.8+).  We include that
+    flag to make it safe to call from the CLI callback when the log level is
+    changed at runtime.
+    """
+    logging.basicConfig(
+        level=settings.log_level,
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[RichHandler(rich_tracebacks=True, markup=True)],
+        force=True,
+    )
+    log = logging.getLogger("mytools")
+    log.setLevel(settings.log_level)
+    return log
+
+# global logger instance; can be updated by re-invoking setup_logging()
+logger = setup_logging()
+
+def format_size(size_bytes: int) -> str:
+    """Convert bytes to human-readable string."""
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size_bytes < 1024.0:
+            return f"{size_bytes:.2f} {unit}"
+        size_bytes /= 1024.0
+    return f"{size_bytes:.2f} TB"
+
+def clear_screen():
+    """Cross-platform clear console."""
+    os.system("cls" if os.name == "nt" else "clear")
+
+def get_project_path() -> Path:
+    """Get current working directory as project path."""
+    return Path.cwd()
+
+def ensure_directory(path: Union[str, Path]) -> Path:
+    """Create directory if it doesn't exist."""
+    p = Path(path)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+def read_file_safe(file_path: Union[str, Path], max_size: int = None) -> str:
+    """Safely read text file with size limit."""
+    path = Path(file_path)
+    if max_size is None:
+        max_size = settings.max_file_size
+    try:
+        if path.stat().st_size > max_size:
+            logger.warning(f"Skipping {path.name}: size exceeds limit")
+            return ""
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError, PermissionError) as e:
+        logger.debug(f"Cannot read {path}: {e}")
+        return ""
+
+def should_ignore(path: Path, ignore_dirs: set, ignore_files: set) -> bool:
+    """Check if a file/directory should be ignored."""
+    name = path.name
+    if path.is_dir():
+        return name in ignore_dirs or name.startswith(".")
+    else:
+        # Check exact name or pattern (simple wildcard support)
+        if name in ignore_files:
+            return True
+        for pattern in ignore_files:
+            if pattern.startswith("*") and name.endswith(pattern[1:]):
+                return True
+            if pattern.endswith("*") and name.startswith(pattern[:-1]):
+                return True
+        return False
+
+============================================================
+📄 FILE: src\mytools\__init__.py
+============================================================
+"""MyTools - Modular CLI Tool Suite."""
+__version__ = "0.2.0"
+
+============================================================
+📄 FILE: src\mytools\__main__.py
+============================================================
+"""Allow running with `python -m mytools`."""
+from .cli import app
+
+if __name__ == "__main__":
+    app()
+
+============================================================
+📄 FILE: src\mytools\plugins\__init__.py
+============================================================
+"""Package for MyTools plugins.
+
+This directory is intentionally empty by default.  Actual tools are loaded
+via entry points declared in `pyproject.toml` under the
+`mytools.plugins` group.  You can use this package for:
+
+* Local development: drop a new tool module here and add an entry point
+to `pyproject.toml` for quick testing.
+* Including simple example plugins shipped with the package.
+
+Having a real package prevents import errors if someone tries to import
+`mytools.plugins` directly.  It does not affect plugin discovery; the CLI
+continues using ``importlib.metadata.entry_points``.
+"""
+
+
+============================================================
+📄 FILE: src\mytools\tools\base.py
+============================================================
+"""Abstract base class for tools."""
+from abc import ABC, abstractmethod
+
+class BaseTool(ABC):
+    """All tools must inherit from this class."""
+
+    name: str = "Unnamed Tool"
+    description: str = "No description"
+
+    @abstractmethod
+    def run(self) -> None:
+        """Execute the tool's main functionality."""
+        pass
+
+============================================================
+📄 FILE: src\mytools\tools\clean_pycache.py
+============================================================
+"""Tool to clean __pycache__ directories."""
+import os
+import shutil
+from pathlib import Path
+
+import typer
+from rich.progress import track
+from rich.console import Console
+
+from ..utils import logger, format_size, get_project_path
+from .base import BaseTool
+
+class CleanPycacheTool(BaseTool):
+    name = "🧹 Clean __pycache__"
+    description = "Remove all __pycache__ folders recursively"
+
+    def run(
+        self,
+        yes: bool = typer.Option(False, "--yes", "-y", help="Skip user confirmation"),
+        no_pause: bool = typer.Option(
+            False,
+            "--no-pause",
+            help="Don't prompt to press Enter at the end",
+        ),
+    ) -> None:
+        # from ..cli import console  # lazy import to avoid circular
+        console = Console()
+
+        console.clear()
+        console.rule("[bold blue]CLEAN PYTHON CACHE[/]")
+
+        start_path = get_project_path()
+        console.print(f"🔍 Cleaning in: [cyan]{start_path}[/]")
+
+        if not yes:
+            if not console.input("\n⚠️  [yellow]Delete all __pycache__ folders?[/] (y/n): ").lower() == "y":
+                console.print("[red]❌ Operation cancelled.[/]")
+                return
+
+        deleted = 0
+        total_size = 0
+
+        # Use os.walk, but we can also use Path.rglob
+        for root, dirs, _ in os.walk(start_path):
+            if "__pycache__" in dirs:
+                path = Path(root) / "__pycache__"
+                try:
+                    folder_size = self._folder_size(path)
+                    shutil.rmtree(path, ignore_errors=True)
+                    dirs.remove("__pycache__")
+                    deleted += 1
+                    total_size += folder_size
+                    rel_path = path.relative_to(start_path)
+                    console.print(f"✅ Deleted: [dim]{rel_path}[/] [green]({format_size(folder_size)})[/]")
+                except Exception as e:
+                    logger.error(f"Failed to delete {path}: {e}")
+
+        if deleted:
+            console.print("\n[bold green]🎯 Summary:[/]")
+            console.print(f"   • Folders deleted: {deleted}")
+            console.print(f"   • Space freed: {format_size(total_size)}")
+        else:
+            console.print("\n[blue]ℹ️  No __pycache__ folders found.[/]")
+
+        if not no_pause:
+            try:
+                console.input("\nPress Enter to continue...")
+            except Exception:
+                # non-interactive environment may raise EOFError
+                pass
+
+    @staticmethod
+    def _folder_size(path: Path) -> int:
+        return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+
+============================================================
+📄 FILE: src\mytools\tools\context_generator.py
+============================================================
+"""Tool to generate optimized project context for AI assistance."""
+
+import os
+import fnmatch
+from pathlib import Path
+from typing import List, Set, Optional
+from datetime import datetime
+
+from rich.console import Console
+from rich.prompt import Prompt, Confirm
+from rich.panel import Panel
+from rich.table import Table
+
+from .base import BaseTool
+from ..utils import logger, get_project_path, format_size
+
+class FullContextTool(BaseTool):
+    """Create optimized project context for AI assistance with flexible filtering."""
+
+    name = "📄 Generate AI Context"
+    description = "Create optimized project context with filtering options for AI"
+
+    # Default ignore settings
+    DEFAULT_IGNORE_DIRS = {
+        ".git", ".github", ".gitlab",
+        ".venv", "venv", "env", "virtualenv",
+        "__pycache__", ".pytest_cache", ".mypy_cache",
+        ".idea", ".vscode", ".vs",
+        "node_modules", "bower_components",
+        "dist", "build", "out", "target",
+        "instance", ".extra", "migrations", "logs",
+        "static/images", "media",
+        "coverage", ".coverage",
+        "site-packages", ".eggs", "eggs",
+    }
+
+    DEFAULT_IGNORE_FILES = {
+        ".DS_Store", "Thumbs.db", "desktop.ini",
+        "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+        "full_project_context.txt", "ai_context.txt",
+        "generate_context.py",
+        "db.sqlite3", "database.db", "*.db",
+        ".env", ".env.local", ".env.*",
+        ".antigravityignore", ".gitignore",
+        "requirements.txt", "requirements-dev.txt",
+        "poetry.lock", "Pipfile.lock",
+        "*.pyc", "*.pyo", "*.pyd",
+        "*.so", "*.dll", "*.dylib",
+        "*.log", "*.tmp", "*.temp",
+        "*.cache", "*.swp", "*.swo",
+    }
+
+    # Prioritized extensions for AI understanding
+    PRIORITY_EXTENSIONS = {
+        ".py", ".js", ".jsx", ".ts", ".tsx",  # Code
+        ".html", ".htm", ".css", ".scss", ".sass",  # Web
+        ".json", ".yaml", ".yml", ".toml",  # Config
+        ".md", ".txt", ".rst",  # Documentation
+        ".sql", ".graphql", ".gql",  # Database
+        ".java", ".cpp", ".c", ".h", ".hpp",  # Other languages
+        ".go", ".rs", ".rb", ".php",
+        ".cs", ".swift", ".kt", ".dart",
+    }
+
+    def run(self) -> None:
+        """Execute the context generation process with user options."""
+        console = Console()
+        console.clear()
+        console.rule("[bold magenta]🤖 AI-PROJECT CONTEXT GENERATOR[/]")
+        
+        project_path = get_project_path()
+        project_name = os.path.basename(project_path)
+        
+        info_panel = (
+            f"📁 [bold cyan]Project:[/] {project_name}\n"
+            f"📍 [bold cyan]Location:[/] [dim]{project_path}[/]"
+        )
+        console.print(Panel(info_panel, border_style="cyan", expand=False))
+        
+        # User configuration
+        config = self._get_user_config(console)
+        
+        # Generation Process
+        with console.status("[magenta]🔍 Scanning project and generating context...[/]", spinner="dots"):
+            tree_structure = self._generate_tree(project_path, config['ignore_dirs'])
+            
+            if config['selection_mode'] == 'custom':
+                # Pause spinner for custom input
+                console.print("\n")
+                file_contents = self._get_custom_files_content(console, project_path, config)
+            elif config['selection_mode'] == 'all':
+                file_contents = self._get_all_files_content(project_path, config)
+            else:  # smart
+                file_contents = self._get_smart_files_content(project_path, config)
+            
+            final_output = self._format_output(project_name, tree_structure, file_contents, config)
+        
+        # Preview and Save
+        self._show_preview(console, final_output)
+        self._handle_save_options(console, project_name, final_output)
+        
+        console.input("\n[dim]Press Enter to continue...[/]")
+    
+    def _get_user_config(self, console: Console) -> dict:
+        console.print("\n[bold]⚙️  Configuration Options:[/]")
+        
+        # Selection mode
+        console.print("\n[bold cyan]1. File Selection Mode[/]")
+        mode_text = (
+            "[1] 🧠 Smart (recommended) - Key files only\n"
+            "[2] 📚 All - All readable files\n"
+            "[3] 🎯 Custom - Select specific files/folders"
+        )
+        console.print(Panel(mode_text, expand=False))
+        mode_choice = Prompt.ask("Choose mode", choices=["1", "2", "3"], default="1")
+        mode_map = {'1': 'smart', '2': 'all', '3': 'custom'}
+        
+        # Ignore Directories
+        console.print("\n[bold cyan]2. Ignore Directories[/]")
+        default_dirs_preview = ", ".join(sorted(list(self.DEFAULT_IGNORE_DIRS))[:5]) + "..."
+        console.print(f"[dim]Default ignores:[/] {default_dirs_preview}")
+        custom_ignore = Prompt.ask("Add more dirs to ignore (comma separated, leave empty to skip)", default="")
+        
+        ignore_dirs = set(self.DEFAULT_IGNORE_DIRS)
+        if custom_ignore:
+            ignore_dirs.update([d.strip() for d in custom_ignore.split(',') if d.strip()])
+        
+        # Ignore Files
+        console.print("\n[bold cyan]3. Ignore File Patterns[/]")
+        console.print("[dim]Default includes: *.log, *.tmp, .env*, etc.[/]")
+        custom_files = Prompt.ask("Add more file patterns (comma separated, leave empty to skip)", default="")
+        
+        ignore_files = set(self.DEFAULT_IGNORE_FILES)
+        if custom_files:
+            ignore_files.update([f.strip() for f in custom_files.split(',') if f.strip()])
+        
+        return {
+            'ignore_dirs': ignore_dirs,
+            'ignore_files': ignore_files,
+            'selection_mode': mode_map[mode_choice],
+            'max_file_size': 20000,   # 20KB limit per file
+            'max_total_size': 200000  # 200KB total limit
+        }
+    
+    def _generate_tree(self, start_path: str, ignore_dirs: Set[str]) -> str:
+        """Generate plain text tree structure (No rich tags for AI export)."""
+        def _tree_recursive(path: Path, prefix: str = "", depth: int = 0, max_depth: int = 5) -> str:
+            if depth > max_depth:
+                return prefix + "└── [depth limit reached]\n"
+            try:
+                items = sorted(path.iterdir())
+            except (PermissionError, OSError):
+                return ""
+            
+            dirs = [i for i in items if i.is_dir() and not i.name.startswith('.') and i.name not in ignore_dirs]
+            files = [i for i in items if i.is_file() and not i.name.startswith('.')]
+            all_items = dirs + files
+            
+            tree_str = ""
+            for idx, item in enumerate(all_items):
+                is_last = idx == len(all_items) - 1
+                connector = "└── " if is_last else "├── "
+                icon = "📁 " if item.is_dir() else "📄 "
+                tree_str += f"{prefix}{connector}{icon}{item.name}\n"
+                
+                if item.is_dir():
+                    extension = "    " if is_last else "│   "
+                    tree_str += _tree_recursive(item, prefix + extension, depth + 1, max_depth)
+            return tree_str
+            
+        return f"Project Tree:\n{_tree_recursive(Path(start_path))}"
+    
+    def _get_smart_files_content(self, project_path: str, config: dict) -> str:
+        important_patterns = [
+            "README*", "readme*", "requirements*.txt", "pyproject.toml", "package.json",
+            "setup.py", "setup.cfg", "*.py", "*.js", "*.ts", "*.jsx", "*.tsx",
+            "*.html", "*.css", "*.json", "*.yaml", "*.yml",
+        ]
+        
+        content_str, total_size = "", 0
+        for root, dirs, files in os.walk(project_path):
+            dirs[:] = [d for d in dirs if d not in config['ignore_dirs']]
+            for file in files:
+                if self._should_ignore_file(file, config['ignore_files']): continue
+                if not self._is_important_file(file, important_patterns): continue
+                
+                path = os.path.join(root, file)
+                content = self._read_file_safe(path, config['max_file_size'])
+                if content:
+                    rel_path = os.path.relpath(path, project_path)
+                    total_size += len(content)
+                    if total_size > config['max_total_size']:
+                        return content_str + "\n\n[⚠️  Total size limit reached. Some files omitted.]\n"
+                    content_str += self._format_file_content(rel_path, content)
+        return content_str
+    
+    def _get_all_files_content(self, project_path: str, config: dict) -> str:
+        content_str, total_size = "", 0
+        for root, dirs, files in os.walk(project_path):
+            dirs[:] = [d for d in dirs if d not in config['ignore_dirs']]
+            for file in files:
+                if self._should_ignore_file(file, config['ignore_files']): continue
+                
+                path = os.path.join(root, file)
+                content = self._read_file_safe(path, config['max_file_size'])
+                if content:
+                    rel_path = os.path.relpath(path, project_path)
+                    total_size += len(content)
+                    if total_size > config['max_total_size']:
+                        return content_str + "\n\n[⚠️  Total size limit reached. Some files omitted.]\n"
+                    content_str += self._format_file_content(rel_path, content)
+        return content_str
+    
+    def _get_custom_files_content(self, console: Console, project_path: str, config: dict) -> str:
+        console.rule("[bold yellow]🎯 Custom File Selection[/]")
+        console.print("Enter file/folder paths (relative to project). Type [bold green]'done'[/] when finished, or [bold blue]'tree'[/] to see structure.")
+        
+        selected_paths = []
+        while True:
+            user_input = Prompt.ask("\nEnter path").strip()
+            
+            if user_input.lower() == 'done': break
+            elif user_input.lower() == 'tree':
+                console.print("\n[dim]Current tree (first 2 levels):[/]")
+                self._show_quick_tree(console, project_path, 2)
+                continue
+            
+            if user_input:
+                full_path = os.path.join(project_path, user_input)
+                if os.path.exists(full_path):
+                    selected_paths.append(full_path)
+                    console.print(f"✅ [green]Added:[/] {user_input}")
+                else:
+                    console.print(f"❌ [red]Not found:[/] {user_input}")
+        
+        if not selected_paths:
+            console.print("[yellow]No files selected. Falling back to Smart Selection.[/]")
+            return self._get_smart_files_content(project_path, config)
+            
+        content_str, total_size = "", 0
+        for selected_path in selected_paths:
+            if os.path.isfile(selected_path):
+                content = self._read_file_safe(selected_path, config['max_file_size'])
+                if content:
+                    rel_path = os.path.relpath(selected_path, project_path)
+                    total_size += len(content)
+                    content_str += self._format_file_content(rel_path, content)
+            elif os.path.isdir(selected_path):
+                for root, dirs, files in os.walk(selected_path):
+                    dirs[:] = [d for d in dirs if d not in config['ignore_dirs']]
+                    for file in files:
+                        if self._should_ignore_file(file, config['ignore_files']): continue
+                        path = os.path.join(root, file)
+                        content = self._read_file_safe(path, config['max_file_size'])
+                        if content:
+                            rel_path = os.path.relpath(path, project_path)
+                            total_size += len(content)
+                            content_str += self._format_file_content(rel_path, content)
+                            
+            if total_size > config['max_total_size']:
+                content_str += "\n\n[⚠️  Total size limit reached.]\n"
+                break
+                
+        return content_str
+    
+    def _should_ignore_file(self, filename: str, ignore_patterns: Set[str]) -> bool:
+        for pattern in ignore_patterns:
+            if fnmatch.fnmatch(filename, pattern):
+                return True
+        return False
+    
+    def _is_important_file(self, filename: str, patterns: List[str]) -> bool:
+        for pattern in patterns:
+            if fnmatch.fnmatch(filename, pattern):
+                return True
+        ext = os.path.splitext(filename)[1].lower()
+        return ext in self.PRIORITY_EXTENSIONS
+    
+    def _read_file_safe(self, filepath: str, max_size: int) -> Optional[str]:
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read(max_size * 2)
+                if len(content) > max_size:
+                    content = content[:max_size] + "\n\n...[File truncated due to size limit]..."
+                return content if content.strip() else None
+        except Exception as e:
+            return f"[Error reading file: {e}]"
+    
+    def _format_file_content(self, rel_path: str, content: str) -> str:
+        separator = "=" * 60
+        return f"\n{separator}\n📄 FILE: {rel_path}\n{separator}\n{content}\n"
+    
+    def _format_output(self, project_name: str, tree: str, contents: str, config: dict) -> str:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return f"""🤖 PROJECT CONTEXT FOR AI ASSISTANCE
+{'=' * 60}
+PROJECT: {project_name}
+SELECTION MODE: {config['selection_mode'].upper()}
+GENERATED: {timestamp}
+{'=' * 60}
+
+📁 PROJECT STRUCTURE:
+{tree}
+
+{'=' * 60}
+📝 FILE CONTENTS:
+{contents}
+
+{'=' * 60}
+💡 FOR AI ASSISTANT:
+This is the complete context of the project. Please analyze the structure
+and code to provide accurate assistance. Key files include configuration
+files, source code, and documentation.
+
+When responding, reference specific files and paths from the structure above.
+"""
+    
+    def _show_preview(self, console: Console, output: str) -> None:
+        console.rule("[bold cyan]📋 CONTEXT PREVIEW[/]")
+        lines = output.split('\n')
+        preview_text = '\n'.join(lines[:30])
+        
+        if len(lines) > 30:
+            preview_text += f"\n\n[dim]... (Showing first 30 of {len(lines)} lines) ...[/]"
+            
+        console.print(Panel(preview_text, border_style="cyan", title="Preview Output"))
+        
+        table = Table(show_header=False, box=None)
+        table.add_row("Total lines:", str(len(lines)))
+        table.add_row("Approx. size:", format_size(len(output.encode('utf-8'))))
+        console.print(Panel(table, title="📊 Statistics", expand=False))
+    
+    def _show_quick_tree(self, console: Console, path: str, depth: int = 2) -> None:
+        def _quick_tree(p: Path, current_depth: int, max_depth: int):
+            if current_depth > max_depth: return
+            prefix = "  " * current_depth
+            try:
+                for item in sorted(p.iterdir()):
+                    if item.name.startswith('.'): continue
+                    icon = "📁" if item.is_dir() else "📄"
+                    console.print(f"{prefix}{icon} {item.name}")
+                    if item.is_dir():
+                        _quick_tree(item, current_depth + 1, max_depth)
+            except: pass
+        _quick_tree(Path(path), 0, depth)
+    
+    def _handle_save_options(self, console: Console, project_name: str, content: str) -> None:
+        console.print("\n[bold]💾 Save Options:[/]")
+        options = (
+            "[1] Save full context\n"
+            "[2] Save only specific section\n"
+            "[3] Save as AI prompt template\n"
+            "[4] Don't save (Exit)"
+        )
+        console.print(Panel(options, expand=False))
+        
+        choice = Prompt.ask("Choose option", choices=["1", "2", "3", "4"], default="1")
+        if choice == '4': return
+        
+        default_filename = f"{project_name}_context.txt"
+        filename = Prompt.ask("Enter filename", default=default_filename)
+        
+        if choice == '1':
+            save_content = content
+        elif choice == '2':
+            section = Prompt.ask("Save [1] Structure only or [2] Contents only?", choices=["1", "2"], default="1")
+            lines = content.split('\n')
+            if section == '1':
+                start = next(i for i, line in enumerate(lines) if "PROJECT STRUCTURE:" in line)
+                end = next((i for i, line in enumerate(lines[start+1:]) if "="*60 in line), len(lines))
+                save_content = '\n'.join(lines[start:start+end+1])
+            else:
+                start = next(i for i, line in enumerate(lines) if "FILE CONTENTS:" in line)
+                save_content = '\n'.join(lines[start:])
+        else:
+            save_content = self._create_ai_prompt_template(content)
+        
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(save_content)
+            
+            console.print(f"\n✅ [bold green]Saved successfully to:[/] {os.path.abspath(filename)}")
+            
+            if choice == '3':
+                console.print("\n[bold magenta]🤖 AI Prompt Suggestion:[/]")
+                prompt_preview = save_content[:300] + "...\n[dim][Full prompt saved in file][/]"
+                console.print(Panel(prompt_preview, border_style="magenta"))
+                
+        except Exception as e:
+            console.print(f"[red]❌ Error saving file: {e}[/]")
+    
+    def _create_ai_prompt_template(self, context: str) -> str:
+        return f"""You are an expert developer assistant. Below is the complete context of a project. Please analyze it thoroughly and provide accurate assistance.
+
+PROJECT CONTEXT:
+{context}
+
+YOUR TASK:
+Based on the project structure and code above, please:
+1. Understand the project architecture and main components.
+2. Identify key files, dependencies, and configuration.
+3. Provide specific, actionable advice or code.
+
+My specific request is: [DESCRIBE WHAT YOU NEED HELP WITH HERE]
+
+Please reference specific files and paths from the project structure in your response. Be detailed but concise."""
+    
+
+============================================================
+📄 FILE: src\mytools\tools\django_manager.py
+============================================================
+"""Django project and app management tool."""
+
+import os
+import subprocess
+import sys
+from typing import Tuple, Optional
+from pathlib import Path
+
+import typer
+from rich.prompt import Prompt, Confirm
+from rich.panel import Panel
+
+from .base import BaseTool
+from ..utils import console, logger, get_project_path
+
+class DjangoTool(BaseTool):
+    """Manage Django projects and apps interactively."""
+
+    name = "🚀 Django Manager"
+    description = "Interactive menu to create project, apps, migrate, runserver"
+
+    def run(self, pause: bool = typer.Option(True, "--pause/--no-pause", help="Wait for Enter between steps")) -> None:
+        """Display Django management menu."""
+        while True:
+            console.clear()
+            console.rule("[bold green]🚀 DJANGO PROJECT MANAGER[/]")
+
+            menu_text = (
+                "[1] 📁 Create Django Project\n"
+                "[2] 🔍 Check Django Installation\n"
+                "[3] 📦 Create Django App\n"
+                "[4] 🛠️  Make Migrations\n"
+                "[5] 🔄 Apply Migrations\n"
+                "[6] 🌐 Run Development Server\n"
+                "[7] 🚪 Back to Main Menu"
+            )
+            console.print(Panel(menu_text, border_style="green", expand=False))
+
+            choice = Prompt.ask("\n[bold cyan]Select an option[/]", choices=[str(i) for i in range(1, 8)])
+
+            if choice == "1":
+                self.create_project()
+            elif choice == "2":
+                self.check_django()
+            elif choice == "3":
+                self.create_app()
+            elif choice == "4":
+                self.make_migrations()
+            elif choice == "5":
+                self.migrate()
+            elif choice == "6":
+                self.run_server()
+            elif choice == "7":
+                break
+
+            if choice != "7" and pause:
+                console.input("\n[dim]Press Enter to continue...[/]")
+
+    # ----------------------------------------------------------------
+    # CORE METHODS (Can be called directly by shortcuts)
+    # ----------------------------------------------------------------
+
+    def create_project(self) -> None:
+        console.clear()
+        console.rule("[bold green]CREATE DJANGO PROJECT[/]")
+
+        current_dir = get_project_path()
+        console.print(f"📂 [bold]Current directory:[/] [dim]{current_dir}[/]\n")
+        
+        console.print("[yellow]ℹ️  This will create a new Django project here.[/]")
+        if not Confirm.ask("Do you want to continue?"):
+            console.print("[red]❌ Operation cancelled.[/]")
+            return
+
+        project_name = Prompt.ask("Enter project name").strip()
+        
+        with console.status(f"[cyan]🚀 Creating Django project '{project_name}'...[/]"):
+            success, output = self._run_command(["django-admin", "startproject", project_name])
+
+        if success:
+            console.print(f"\n✅ [bold green]Project '{project_name}' created successfully![/]")
+            console.print(f"📁 [bold]Location:[/] {os.path.join(current_dir, project_name)}\n")
+            
+            steps = (
+                f"1. cd {project_name}\n"
+                f"2. python manage.py migrate\n"
+                f"3. python manage.py runserver"
+            )
+            console.print(Panel(steps, title="📋 Next steps", border_style="cyan", expand=False))
+        else:
+            console.print(f"[red]❌ Failed to create project:[/] {output}")
+
+    def check_django(self) -> None:
+        console.clear()
+        console.rule("[bold green]CHECK DJANGO INSTALLATION[/]")
+
+        with console.status("[cyan]🔍 Checking Django...[/]"):
+            success, output = self._run_command([sys.executable, "-m", "django", "--version"])
+        
+        if success:
+            console.print(f"✅ [bold green]Django {output.strip()} is installed and working.[/]")
+            try:
+                import django
+                console.print(f"📦 [dim]Module path: {django.__file__}[/]")
+            except ImportError as e:
+                console.print(f"[yellow]⚠️  Django import issue:[/] {e}")
+        else:
+            console.print("[red]❌ Django is not installed or not in PATH.[/]")
+            console.print("\n💡 [bold]Installation commands:[/]")
+            console.print("   [cyan]pip install django[/]")
+
+    def create_app(self) -> None:
+        console.clear()
+        console.rule("[bold green]CREATE DJANGO APP[/]")
+
+        project_dir = self._find_django_project()
+        if not project_dir:
+            console.print("[red]❌ Not in a Django project directory (manage.py not found).[/]")
+            return
+
+        app_name = Prompt.ask("Enter app name").strip()
+        
+        original_dir = os.getcwd()
+        os.chdir(project_dir)
+        
+        with console.status(f"[cyan]🚀 Creating app '{app_name}'...[/]"):
+            success, output = self._run_command([sys.executable, "manage.py", "startapp", app_name])
+            
+        os.chdir(original_dir)
+
+        if success:
+            console.print(f"\n✅ [bold green]App '{app_name}' created successfully![/]")
+            steps = (
+                f"1. Add '{app_name}' to INSTALLED_APPS in settings.py\n"
+                f"2. Create models in {app_name}/models.py\n"
+                f"3. python manage.py makemigrations {app_name}\n"
+                f"4. python manage.py migrate"
+            )
+            console.print(Panel(steps, title="📋 Next steps", border_style="cyan", expand=False))
+        else:
+            console.print(f"[red]❌ Failed to create app:[/] {output}")
+
+    def make_migrations(self) -> None:
+        console.clear()
+        console.rule("[bold green]MAKE MIGRATIONS[/]")
+
+        project_dir = self._find_django_project()
+        if not project_dir:
+            console.print("[red]❌ manage.py not found. Are you in a Django project?[/]")
+            return
+
+        app_name = Prompt.ask("Enter app name [dim](leave empty for all apps)[/]", default="")
+        cmd = [sys.executable, "manage.py", "makemigrations"]
+        if app_name:
+            cmd.append(app_name)
+
+        original_dir = os.getcwd()
+        os.chdir(project_dir)
+        
+        with console.status("[cyan]🔨 Generating migrations...[/]"):
+            success, output = self._run_command(cmd)
+            
+        os.chdir(original_dir)
+
+        if success:
+            console.print("✅ [bold green]Migrations created successfully![/]")
+            if output:
+                console.print(f"\n[dim]{output}[/]")
+        else:
+            console.print(f"[red]❌ Failed:[/] {output}")
+
+    def migrate(self) -> None:
+        console.clear()
+        console.rule("[bold green]APPLY MIGRATIONS[/]")
+
+        project_dir = self._find_django_project()
+        if not project_dir:
+            console.print("[red]❌ manage.py not found.[/]")
+            return
+
+        if not Confirm.ask("Apply all pending migrations?"):
+            return
+
+        original_dir = os.getcwd()
+        os.chdir(project_dir)
+        
+        with console.status("[cyan]🔄 Applying migrations to database...[/]"):
+            success, output = self._run_command([sys.executable, "manage.py", "migrate"])
+            
+        os.chdir(original_dir)
+
+        if success:
+            console.print("✅ [bold green]Migrations applied successfully![/]")
+            if output:
+                lines = output.strip().split('\n')
+                console.print("\n[dim]" + "\n".join(lines[-10:]) + "[/]")
+        else:
+            console.print(f"[red]❌ Migration failed:[/] {output}")
+
+    def run_server(self) -> None:
+        console.clear()
+        console.rule("[bold green]RUN DEVELOPMENT SERVER[/]")
+
+        project_dir = self._find_django_project()
+        if not project_dir:
+            console.print("[red]❌ manage.py not found. Please navigate to your project root.[/]")
+            return
+
+        port = Prompt.ask("Enter port number", default="8000")
+
+        console.print(f"\n🌐 [bold cyan]Starting server on port {port}...[/]")
+        console.print("[dim]Press Ctrl+C to stop the server[/]\n")
+
+        original_dir = os.getcwd()
+        os.chdir(project_dir)
+        
+        try:
+            subprocess.run([sys.executable, "manage.py", "runserver", f"127.0.0.1:{port}"])
+        except KeyboardInterrupt:
+            console.print("\n\n🛑 [yellow]Server stopped by user.[/]")
+        except Exception as e:
+            console.print(f"[red]❌ Error running server:[/] {e}")
+        finally:
+            os.chdir(original_dir)
+
+    def _find_django_project(self) -> Optional[str]:
+        current_dir = os.getcwd()
+        check_dir = current_dir
+        for _ in range(5):
+            if os.path.exists(os.path.join(check_dir, "manage.py")):
+                return check_dir
+            parent = os.path.dirname(check_dir)
+            if parent == check_dir:
+                break
+            check_dir = parent
+        return None
+
+    def _run_command(self, cmd: list, shell: bool = False) -> Tuple[bool, str]:
+        try:
+            result = subprocess.run(cmd, shell=shell, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+            if result.returncode == 0:
+                return True, result.stdout.strip()
+            return False, result.stderr.strip() or result.stdout.strip() or "Unknown error"
+        except Exception as e:
+            return False, str(e)
+
+
+# =====================================================================
+# SHORTCUT CLI TOOLS (For Direct Commands)
+# =====================================================================
+
+class DjRunTool(BaseTool):
+    name = "dj-run"
+    description = "Shortcut: Directly start the Django development server"
+    
+    def run(self) -> None:
+        DjangoTool().run_server()
+
+class DjMigrateTool(BaseTool):
+    name = "dj-migrate"
+    description = "Shortcut: Apply Django database migrations"
+    
+    def run(self) -> None:
+        DjangoTool().migrate()
+
+class DjMakeMigrationsTool(BaseTool):
+    name = "dj-makemigrations"
+    description = "Shortcut: Create new Django migrations"
+    
+    def run(self) -> None:
+        DjangoTool().make_migrations()
+
+class DjAppTool(BaseTool):
+    name = "dj-app"
+    description = "Shortcut: Create a new Django app"
+    
+    def run(self) -> None:
+        DjangoTool().create_app()
+
+============================================================
+📄 FILE: src\mytools\tools\env_manager.py
+============================================================
+"""Virtual environment and .env file manager."""
+
+import os
+import shutil
+import sys
+from pathlib import Path
+from typing import Optional, Tuple, List
+import subprocess
+
+from .base import BaseTool
+from ..utils import console, logger
+
+
+class EnvTool(BaseTool):
+    """Manage virtual environments and environment files."""
+
+    name = "🐍 Environment Manager"
+    description = "Create/delete virtual env, manage .env files"
+
+    def run(self) -> None:
+        """Display environment management menu."""
+        while True:
+            console.clear()
+            console.rule("[bold yellow]ENVIRONMENT MANAGER[/]")
+            
+            console.print("\n[bold cyan]1.[/] Create Virtual Environment (.venv)")
+            console.print("[bold cyan]2.[/] Delete Virtual Environment")
+            console.print("[bold cyan]3.[/] Create .env File")
+            console.print("[bold cyan]4.[/] Delete .env File")
+            console.print("[bold cyan]5.[/] List Environment Variables")
+            console.print("[bold cyan]6.[/] Check Python Environment")
+            console.print("[bold cyan]7.[/] Back to Main Menu")
+            
+            choice = console.input("\n[bold]Select option (1-7): [/]").strip()
+
+            if choice == "1":
+                self._create_venv()
+            elif choice == "2":
+                self._delete_venv()
+            elif choice == "3":
+                self._create_env_file()
+            elif choice == "4":
+                self._delete_env_file()
+            elif choice == "5":
+                self._list_env_vars()
+            elif choice == "6":
+                self._check_python_env()
+            elif choice == "7":
+                break
+            else:
+                console.print("[red]❌ Invalid option[/]")
+
+            if choice != "7":
+                console.input("\n[dim]Press Enter to continue...[/]")
+
+    def _create_venv(self) -> None:
+        """Create a virtual environment."""
+        console.clear()
+        console.rule("[bold cyan]CREATE VIRTUAL ENVIRONMENT[/]")
+
+        current_dir = Path.cwd()
+        console.print(f"[blue]📂[/] Current directory: [cyan]{current_dir}[/]")
+
+        console.print("\n[bold]🔧 Virtual Environment Options:[/]")
+        console.print("   [cyan]1.[/] .venv [dim](Recommended)[/]")
+        console.print("   [cyan]2.[/] venv")
+        console.print("   [cyan]3.[/] Custom name")
+
+        choice = console.input("\n[bold]Select option (1-3): [/]").strip()
+
+        if choice == "1":
+            venv_name = ".venv"
+        elif choice == "2":
+            venv_name = "venv"
+        elif choice == "3":
+            venv_name = console.input("[bold]Enter virtual environment name: [/]").strip()
+            if not venv_name:
+                console.print("[red]❌ Name cannot be empty.[/]")
+                return
+        else:
+            console.print("[red]❌ Invalid option.[/]")
+            return
+
+        venv_path = current_dir / venv_name
+
+        # Check if already exists
+        if venv_path.exists():
+            console.print(f"[yellow]⚠️  Virtual environment '{venv_name}' already exists.[/]")
+            overwrite = console.input("[bold]Delete and recreate? (y/n): [/]").lower()
+            if overwrite != 'y':
+                console.print("[red]❌ Operation cancelled.[/]")
+                return
+            shutil.rmtree(venv_path, ignore_errors=True)
+            console.print(f"[green]✅ Existing '{venv_name}' deleted.[/]")
+
+        console.print(f"\n[bold]🚀 Creating virtual environment '{venv_name}'...[/]")
+
+        # Use sys.executable to ensure using current Python
+        success, output = self._run_command([sys.executable, "-m", "venv", str(venv_name)])
+
+        if success:
+            console.print(f"[green]✅ Virtual environment created at: {venv_path}[/]")
+            
+            # Show activation commands
+            console.print("\n[bold]🔧 Activation commands:[/]")
+            if os.name == 'nt':  # Windows
+                console.print(f"   [cyan]{venv_name}\\Scripts\\activate[/]")
+            else:  # Unix/Linux/Mac
+                console.print(f"   [cyan]source {venv_name}/bin/activate[/]")
+            
+            # Offer to install requirements if exists
+            req_file = current_dir / "requirements.txt"
+            if req_file.exists():
+                install_req = console.input(f"\n[bold]📦 Install from requirements.txt? (y/n): [/]").lower()
+                if install_req == 'y':
+                    self._install_requirements(venv_path, req_file)
+        else:
+            console.print(f"[red]❌ Failed to create virtual environment: {output}[/]")
+            logger.error(f"Venv creation failed: {output}")
+
+    def _delete_venv(self) -> None:
+        """Delete a virtual environment."""
+        console.clear()
+        console.rule("[bold cyan]DELETE VIRTUAL ENVIRONMENT[/]")
+
+        current_dir = Path.cwd()
+        console.print(f"[blue]📂[/] Current directory: [cyan]{current_dir}[/]")
+
+        # Look for common venv names
+        common_venvs = ['.venv', 'venv', 'env']
+        found_venvs = []
+
+        for venv_name in common_venvs:
+            venv_path = current_dir / venv_name
+            if venv_path.exists():
+                found_venvs.append((venv_name, venv_path))
+
+        if not found_venvs:
+            console.print("\n[yellow]ℹ️  No standard virtual environments found in current directory.[/]")
+            custom_name = console.input("[bold]Enter virtual environment name to delete: [/]").strip()
+            if custom_name:
+                custom_path = current_dir / custom_name
+                if custom_path.exists():
+                    found_venvs.append((custom_name, custom_path))
+                else:
+                    console.print(f"[red]❌ Virtual environment '{custom_name}' not found.[/]")
+                    return
+            else:
+                console.print("[red]❌ No virtual environment specified.[/]")
+                return
+
+        console.print("\n[bold]📁 Found virtual environments:[/]")
+        for i, (name, path) in enumerate(found_venvs, 1):
+            size = self._get_folder_size(path)
+            console.print(f"   [cyan]{i}.[/] {name} ([dim]{self._format_size(size)}[/])")
+
+        if len(found_venvs) > 1:
+            choice = console.input(f"\n[bold]Select environment to delete (1-{len(found_venvs)}): [/]").strip()
+            if choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < len(found_venvs):
+                    venv_name, venv_path = found_venvs[idx]
+                else:
+                    console.print("[red]❌ Invalid selection.[/]")
+                    return
+            else:
+                console.print("[red]❌ Invalid input.[/]")
+                return
+        else:
+            venv_name, venv_path = found_venvs[0]
+
+        console.print(f"\n[yellow]⚠️  WARNING:[/] This will permanently delete '[cyan]{venv_name}[/]'")
+        console.print(f"[dim]📍 Path: {venv_path}[/]")
+
+        confirm = console.input(f"\n[bold]Are you sure you want to delete '{venv_name}'? (y/N): [/]").lower()
+        if confirm != 'y':
+            console.print("[red]❌ Operation cancelled.[/]")
+            return
+
+        try:
+            shutil.rmtree(venv_path, ignore_errors=True)
+            console.print(f"[green]✅ Virtual environment '{venv_name}' deleted successfully.[/]")
+            logger.info(f"Deleted virtual environment: {venv_name}")
+        except Exception as e:
+            console.print(f"[red]❌ Failed to delete: {e}[/]")
+            logger.error(f"Failed to delete venv: {e}")
+
+    def _create_env_file(self) -> None:
+        """Create a .env file with template."""
+        console.clear()
+        console.rule("[bold cyan]CREATE .ENV FILE[/]")
+
+        current_dir = Path.cwd()
+        env_path = current_dir / ".env"
+
+        if env_path.exists():
+            console.print("[yellow]⚠️  .env file already exists.[/]")
+            overwrite = console.input("[bold]Overwrite? (y/n): [/]").lower()
+            if overwrite != 'y':
+                console.print("[red]❌ Operation cancelled.[/]")
+                return
+
+        console.print("\n[bold]📝 Creating .env file with common environment variables...[/]")
+        console.print("[dim]   (You can edit these values after creation)[/]")
+
+        env_template = """# Environment Variables
+# Add your sensitive data here - never commit to version control
+
+# Database Configuration
+DB_NAME=your_database_name
+DB_USER=your_username
+DB_PASSWORD=your_password
+DB_HOST=localhost
+DB_PORT=5432
+
+# Django Settings
+DJANGO_SECRET_KEY=your-secret-key-here-change-this-in-production
+DJANGO_DEBUG=True
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+
+# Email Configuration
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USE_TLS=True
+EMAIL_HOST_USER=your-email@gmail.com
+EMAIL_HOST_PASSWORD=your-app-specific-password
+
+# API Keys
+API_KEY=your_api_key_here
+SECRET_API_KEY=your_secret_api_key_here
+
+# Application Settings
+LOG_LEVEL=INFO
+ENVIRONMENT=development
+"""
+        try:
+            with open(env_path, 'w', encoding='utf-8') as f:
+                f.write(env_template)
+            
+            console.print(f"[green]✅ .env file created at: {env_path}[/]")
+            console.print(f"[dim]📏 File size: {env_path.stat().st_size} bytes[/]")
+            
+            # Show security warning
+            console.print("\n[yellow]⚠️  SECURITY REMINDER:[/]")
+            console.print("   • Add .env to .gitignore")
+            console.print("   • Never commit .env to version control")
+            console.print("   • Use different .env files for different environments")
+            
+            # Show preview
+            preview = console.input("\n[bold]Show file preview? (y/n): [/]").lower()
+            if preview == 'y':
+                console.print("\n[bold]📄 .env Preview:[/]")
+                console.rule("-" * 40)
+                with open(env_path, 'r', encoding='utf-8') as f:
+                    console.print(f.read())
+                console.rule("-" * 40)
+                
+            logger.info(f"Created .env file in {current_dir}")
+                
+        except Exception as e:
+            console.print(f"[red]❌ Failed to create .env file: {e}[/]")
+            logger.error(f"Failed to create .env: {e}")
+
+    def _delete_env_file(self) -> None:
+        """Delete .env file."""
+        console.clear()
+        console.rule("[bold cyan]DELETE .ENV FILE[/]")
+
+        current_dir = Path.cwd()
+        env_path = current_dir / ".env"
+
+        if not env_path.exists():
+            console.print("[red]❌ .env file not found in current directory.[/]")
+            return
+
+        file_size = env_path.stat().st_size
+        console.print(f"[blue]📄[/] File: [cyan]{env_path}[/]")
+        console.print(f"[dim]📏 Size: {self._format_size(file_size)}[/]")
+        
+        # Show preview
+        preview = console.input("\n[bold]Show file preview? (y/n): [/]").lower()
+        if preview == 'y':
+            try:
+                with open(env_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    console.print("\n[bold]📄 File Content:[/]")
+                    console.rule("-" * 40)
+                    console.print(content[:500])  # Show first 500 chars
+                    if len(content) > 500:
+                        console.print("[dim]... (truncated)[/]")
+                    console.rule("-" * 40)
+            except Exception:
+                console.print("[yellow]⚠️  Could not read file content.[/]")
+
+        confirm = console.input(f"\n[yellow]⚠️  Delete .env file? (y/N): [/]").lower()
+        if confirm != 'y':
+            console.print("[red]❌ Operation cancelled.[/]")
+            return
+
+        try:
+            env_path.unlink()
+            console.print("[green]✅ .env file deleted successfully.[/]")
+            logger.info(f"Deleted .env file in {current_dir}")
+        except Exception as e:
+            console.print(f"[red]❌ Failed to delete: {e}[/]")
+            logger.error(f"Failed to delete .env: {e}")
+
+    def _list_env_vars(self) -> None:
+        """List environment variables."""
+        console.clear()
+        console.rule("[bold cyan]ENVIRONMENT VARIABLES[/]")
+
+        console.print("[bold]🌍 System Environment Variables:[/]")
+        console.rule("-" * 50)
+        
+        # Common environment variables to show
+        common_vars = [
+            'PATH', 'PYTHONPATH', 'VIRTUAL_ENV', 'HOME', 'USER',
+            'LANG', 'PYTHON_VERSION', 'PWD', 'SHELL'
+        ]
+        
+        env_vars = dict(os.environ)
+        
+        console.print("\n[bold]🔧 Common Variables:[/]")
+        for var in common_vars:
+            if var in env_vars:
+                value = env_vars[var]
+                # Truncate long values
+                if len(value) > 100:
+                    value = value[:100] + "..."
+                console.print(f"   [cyan]{var}:[/] {value}")
+        
+        console.print("\n[bold]📊 All Variables (alphabetical):[/]")
+        console.rule("-" * 50)
+        
+        for key in sorted(env_vars.keys()):
+            if key not in common_vars:  # Already shown
+                value = env_vars[key]
+                if len(value) > 50:
+                    value = value[:50] + "..."
+                console.print(f"   [cyan]{key}:[/] {value}")
+        
+        console.print(f"\n[bold]📈 Total variables:[/] {len(env_vars)}")
+
+    def _check_python_env(self) -> None:
+        """Check current Python environment."""
+        console.clear()
+        console.rule("[bold cyan]PYTHON ENVIRONMENT CHECK[/]")
+
+        console.print("[bold]🐍 Python Information:[/]")
+        console.print(f"   [cyan]Version:[/] {sys.version}")
+        console.print(f"   [cyan]Executable:[/] {sys.executable}")
+        console.print(f"   [cyan]Platform:[/] {sys.platform}")
+        console.print(f"   [cyan]Prefix:[/] {sys.prefix}")
+
+        # Check if in virtual environment
+        if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+            console.print("   [green]✅ Running in virtual environment[/]")
+            if 'VIRTUAL_ENV' in os.environ:
+                console.print(f"   [cyan]Virtual env path:[/] {os.environ['VIRTUAL_ENV']}")
+        else:
+            console.print("   [yellow]ℹ️  Running in system Python[/]")
+
+        # Check pip version
+        console.print("\n[bold]📦 Package Manager:[/]")
+        success, output = self._run_command([sys.executable, "-m", "pip", "--version"])
+        if success:
+            pip_info = output.split('\n')[0] if output else "Unknown"
+            console.print(f"   {pip_info}")
+        else:
+            console.print("   [red]❌ pip not available[/]")
+
+        # List installed packages (top 10)
+        console.print("\n[bold]📋 Top installed packages:[/]")
+        success, output = self._run_command([sys.executable, "-m", "pip", "list", "--format=freeze"])
+        if success and output:
+            packages = output.strip().split('\n')
+            for pkg in packages[:10]:  # Show first 10
+                console.print(f"   • {pkg}")
+            if len(packages) > 10:
+                console.print(f"   [dim]... and {len(packages) - 10} more[/]")
+        else:
+            console.print("   [yellow]ℹ️  No packages found or pip error[/]")
+
+    def _install_requirements(self, venv_path: Path, req_file: Path) -> None:
+        """Install requirements in virtual environment.
+        
+        Args:
+            venv_path: Path to virtual environment.
+            req_file: Path to requirements.txt.
+        """
+        console.print(f"\n[bold]📦 Installing packages from {req_file}...[/]")
+        
+        # Determine pip path based on OS
+        if os.name == 'nt':  # Windows
+            pip_path = venv_path / "Scripts" / "pip"
+        else:  # Unix/Linux/Mac
+            pip_path = venv_path / "bin" / "pip"
+        
+        success, output = self._run_command([str(pip_path), "install", "-r", str(req_file)])
+        
+        if success:
+            console.print("[green]✅ Requirements installed successfully![/]")
+            if output:
+                # Show last few lines of output
+                lines = output.strip().split('\n')
+                if len(lines) > 5:
+                    console.print("\n".join(lines[-5:]))
+            logger.info(f"Installed requirements from {req_file}")
+        else:
+            console.print(f"[red]❌ Failed to install requirements: {output}[/]")
+            logger.error(f"Failed to install requirements: {output}")
+
+    def _get_folder_size(self, folder_path: Path) -> int:
+        """Calculate folder size in bytes.
+        
+        Args:
+            folder_path: Path to folder.
+            
+        Returns:
+            Size in bytes.
+        """
+        total_size = 0
+        for item in folder_path.rglob('*'):
+            if item.is_file():
+                total_size += item.stat().st_size
+        return total_size
+
+    @staticmethod
+    def _format_size(size_bytes: int) -> str:
+        """Format size in human readable format.
+        
+        Args:
+            size_bytes: Size in bytes.
+            
+        Returns:
+            Formatted size string.
+        """
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size_bytes < 1024.0:
+                return f"{size_bytes:.1f} {unit}"
+            size_bytes /= 1024.0
+        return f"{size_bytes:.1f} TB"
+
+    def _run_command(self, cmd: List[str], shell: bool = False) -> Tuple[bool, str]:
+        """Run a shell command.
+        
+        Args:
+            cmd: Command list.
+            shell: Whether to use shell.
+            
+        Returns:
+            (success, output)
+        """
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=shell,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='ignore'
+            )
+            
+            if result.returncode == 0:
+                return True, result.stdout.strip()
+            else:
+                error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+                logger.error(f"Command failed: {' '.join(cmd)} - {error_msg}")
+                return False, error_msg
+                
+        except FileNotFoundError:
+            error_msg = f"Command not found: {' '.join(cmd)}"
+            logger.error(error_msg)
+            return False, error_msg
+        except Exception as e:
+            logger.error(f"Command error: {e}")
+            return False, str(e)
+
+============================================================
+📄 FILE: src\mytools\tools\file_counter.py
+============================================================
+"""Count files and folders by extension and size."""
+import os
+from collections import defaultdict
+
+from rich.table import Table
+from rich.panel import Panel
+
+from .base import BaseTool
+# Assuming format_size is in your utils from the previous tool
+from ..utils import console, logger, get_project_path, format_size
+
+class FileCounterTool(BaseTool):
+    name = "📊 File Statistics"
+    description = "Count files and folders by type and show size"
+
+    def run(self) -> None:
+        """Execute the file counting process."""
+        console.clear()
+        console.rule("[bold magenta]FILE STATISTICS[/]")
+
+        project_path = get_project_path()
+
+        # Folders that we don't want to count
+        IGNORED_DIRS = {".git", "__pycache__", "node_modules", "venv", ".venv", ".idea"}
+
+        # Dictionary to store both count and size for each extension
+        file_stats = defaultdict(lambda: {"count": 0, "size": 0})
+        total_files = 0
+        total_dirs = 0
+        total_size = 0
+
+        # Scanning the directory
+        with console.status("[cyan]Scanning project files...[/]", spinner="dots"):
+            for root, dirs, files in os.walk(project_path):
+                # Modify dirs in-place to skip ignored directories
+                dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
+
+                total_dirs += len(dirs)
+                total_files += len(files)
+
+                for file in files:
+                    filepath = os.path.join(root, file)
+                    ext = os.path.splitext(file)[1].lower() or "[no extension]"
+                    
+                    try:
+                        size = os.path.getsize(filepath)
+                    except OSError:
+                        size = 0  # Ignore files that can't be read
+
+                    file_stats[ext]["count"] += 1
+                    file_stats[ext]["size"] += size
+                    total_size += size
+
+        # -----------------------------------------
+        # DISPLAY RESULTS
+        # -----------------------------------------
+        
+        # 1. Summary Panel
+        summary_text = (
+            f"📁 [bold]Project:[/] {os.path.basename(project_path)}\n"
+            f"📍 [bold]Path:[/] [dim]{project_path}[/]\n\n"
+            f"📂 [bold]Total Folders:[/] [cyan]{total_dirs}[/]\n"
+            f"📄 [bold]Total Files:[/] [cyan]{total_files}[/]\n"
+            f"💾 [bold]Total Size:[/] [green]{format_size(total_size)}[/]"
+        )
+        console.print("\n")
+        console.print(Panel(summary_text, title="🎯 Project Summary", border_style="blue", expand=False))
+
+        # 2. Detailed Table by Extension
+        table = Table(title="📊 Files by Extension", header_style="bold magenta")
+        table.add_column("Extension", style="cyan", no_wrap=True)
+        table.add_column("File Count", justify="right", style="yellow")
+        table.add_column("Total Size", justify="right", style="green")
+
+        # Sort extensions by count (highest first)
+        sorted_stats = sorted(file_stats.items(), key=lambda x: x[1]["count"], reverse=True)
+
+        for ext, data in sorted_stats:
+            table.add_row(
+                ext,
+                str(data["count"]),
+                format_size(data["size"])
+            )
+
+        console.print("\n")
+        console.print(table)
+
+        console.input("\n[dim]Press Enter to continue...[/]")
+
+============================================================
+📄 FILE: src\mytools\tools\file_ops.py
+============================================================
+"""Tool for file and folder operations."""
+import os
+import shutil
+import stat
+import time
+from pathlib import Path
+from typing import List
+
+from rich.console import Console
+from rich.prompt import Prompt, Confirm, IntPrompt
+from rich.table import Table
+from rich.panel import Panel
+
+from .base import BaseTool
+from ..utils import logger, get_project_path, format_size
+
+class FileOperationsTool(BaseTool):
+    """Perform file and folder operations."""
+
+    name = "📁 File Operations"
+    description = "List, copy, move, delete files and folders"
+
+    def run(self) -> None:
+        """Display file operations menu."""
+        console = Console()
+        
+        while True:
+            console.clear()
+            console.rule("[bold cyan]📁 FILE OPERATIONS[/]")
+
+            menu_text = (
+                "[1] 📋 List all project files (for copy path)\n"
+                "[2] 📄 Copy file/folder\n"
+                "[3] 🚚 Move file/folder\n"
+                "[4] 🗑️  Delete file/folder\n"
+                "[5] ℹ️  File information\n"
+                "[6] 📁 Create new folder\n"
+                "[7] 📝 Create new file\n"
+                "[8] 🚪 Back to Main Menu"
+            )
+            console.print(Panel(menu_text, border_style="cyan", expand=False))
+
+            choice = Prompt.ask("\n[bold cyan]Select an option[/]", choices=[str(i) for i in range(1, 9)])
+
+            if choice == "1":
+                self._list_project_files(console)
+            elif choice == "2":
+                self._copy_file_folder(console)
+            elif choice == "3":
+                self._move_file_folder(console)
+            elif choice == "4":
+                self._delete_file_folder(console)
+            elif choice == "5":
+                self._file_info(console)
+            elif choice == "6":
+                self._create_folder(console)
+            elif choice == "7":
+                self._create_file(console)
+            elif choice == "8":
+                break
+
+            if choice != "8":
+                console.input("\n[dim]Press Enter to continue...[/]")
+
+    def _list_project_files(self, console: Console) -> None:
+        console.clear()
+        console.rule("[bold cyan]LIST PROJECT FILES[/]")
+
+        current_dir = get_project_path()
+        console.print(f"📍 [bold]Current directory:[/] [dim]{current_dir}[/]\n")
+
+        all_files = []
+        total_size = 0
+
+        with console.status("[cyan]🔍 Scanning files...[/]", spinner="dots"):
+            for root, dirs, files in os.walk(current_dir):
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
+
+                for file in files:
+                    if file.startswith("."):
+                        continue
+
+                    file_path = os.path.join(root, file)
+                    try:
+                        file_size = os.path.getsize(file_path)
+                        rel_path = os.path.relpath(file_path, current_dir)
+                        all_files.append({"path": rel_path, "size": file_size, "full_path": file_path})
+                        total_size += file_size
+                    except (OSError, PermissionError):
+                        continue
+
+        if not all_files:
+            console.print("[red]❌ No files found.[/]")
+            return
+
+        all_files.sort(key=lambda x: x["path"])
+        console.print(f"📊 [bold green]Found {len(all_files)} files[/] ({format_size(total_size)})")
+
+        options = (
+            "[1] Show all files with details\n"
+            "[2] Show only file paths (for copying)\n"
+            "[3] Search for specific files\n"
+            "[4] Export list to file"
+        )
+        console.print(Panel(options, title="📋 Display options", expand=False))
+        
+        display_choice = Prompt.ask("Select option", choices=["1", "2", "3", "4"], default="1")
+
+        if display_choice == "1":
+            self._show_files_with_details(console, all_files)
+        elif display_choice == "2":
+            self._show_file_paths_only(console, all_files)
+        elif display_choice == "3":
+            self._search_files(console, all_files)
+        elif display_choice == "4":
+            self._export_file_list(console, all_files, current_dir)
+
+    def _show_files_with_details(self, console: Console, files: List[dict]) -> None:
+        table = Table(title="📄 Files with details", header_style="bold magenta")
+        table.add_column("No.", style="dim", width=6)
+        table.add_column("Size", style="green", justify="right")
+        table.add_column("Path", style="cyan")
+
+        for idx, file_info in enumerate(files, 1):
+            if idx <= 100:
+                table.add_row(str(idx), format_size(file_info["size"]), file_info['path'])
+            else:
+                table.add_row("...", "...", f"[dim]and {len(files) - 100} more files[/]")
+                break
+
+        console.print(table)
+
+        if files:
+            console.print("\n[bold]📋 Copy options:[/]")
+            choice = Prompt.ask("Enter file number to copy, 'a' for all, 'q' to quit", default="q").lower()
+
+            if choice == "a":
+                self._copy_all_paths(console, files)
+            elif choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < len(files):
+                    self._copy_to_clipboard(files[idx]["path"])
+                    console.print(f"✅ [green]Copied:[/] {files[idx]['path']}")
+                else:
+                    console.print("[red]❌ Invalid file number[/]")
+
+    def _show_file_paths_only(self, console: Console, files: List[dict]) -> None:
+        console.print("\n[bold]📄 File paths only:[/]")
+        for idx, file_info in enumerate(files[:50], 1):
+            console.print(file_info['path'])
+            
+        if len(files) > 50:
+            console.print(f"[dim]... and {len(files) - 50} more files[/]")
+
+        if files and Confirm.ask("\n📋 Copy all paths to file?"):
+            self._copy_all_paths(console, files)
+
+    def _search_files(self, console: Console, files: List[dict]) -> None:
+        search_choice = Prompt.ask("\n🔍 Search by", choices=["1", "2", "3"], default="1")
+        # 1: Name, 2: Extension, 3: Size
+        
+        results = []
+        if search_choice == "1":
+            term = Prompt.ask("Enter filename part").lower()
+            results = [f for f in files if term in f["path"].lower()]
+        elif search_choice == "2":
+            ext = Prompt.ask("Enter extension (e.g. .py)").lower()
+            if not ext.startswith("."): ext = "." + ext
+            results = [f for f in files if f["path"].lower().endswith(ext)]
+        elif search_choice == "3":
+            min_kb = IntPrompt.ask("Min size in KB", default=0) * 1024
+            max_kb = IntPrompt.ask("Max size in KB (0 for no limit)", default=0) * 1024
+            max_kb = max_kb if max_kb > 0 else float('inf')
+            results = [f for f in files if min_kb <= f["size"] <= max_kb]
+
+        if not results:
+            console.print("[red]❌ No files found.[/]")
+            return
+
+        console.print(f"\n📊 [bold green]{len(results)} files found[/]")
+        self._show_files_with_details(console, results)
+
+    def _export_file_list(self, console: Console, files: List[dict], current_dir: str) -> None:
+        filename = Prompt.ask("\nEnter output filename", default="file_list.txt")
+        fmt = Prompt.ask("Format [1] Simple [2] Detailed [3] CSV", choices=["1", "2", "3"], default="2")
+
+        try:
+            with open(filename, "w", encoding="utf-8") as f:
+                if fmt == "3":
+                    f.write("Path,Size(bytes),Size(human)\n")
+                    for file in files:
+                        f.write(f'"{file["path"]}",{file["size"]},"{format_size(file["size"])}"\n')
+                else:
+                    for file in files:
+                        size_str = format_size(file["size"]) if fmt == "2" else ""
+                        f.write(f"{size_str:<12} {file['path']}\n" if fmt == "2" else f"{file['path']}\n")
+
+            console.print(f"✅ [green]Exported to:[/] {os.path.abspath(filename)}")
+        except Exception as e:
+            console.print(f"[red]❌ Export failed: {e}[/]")
+
+    def _copy_all_paths(self, console: Console, files: List[dict]) -> None:
+        all_paths = "\n".join(f["path"] for f in files)
+        if self._copy_to_clipboard(all_paths):
+            console.print(f"✅ [green]Copied {len(files)} paths to clipboard[/]")
+        else:
+            console.print("[yellow]⚠️ Clipboard not available. Showing paths:[/]")
+            console.print(all_paths[:500] + ("..." if len(all_paths) > 500 else ""))
+
+    def _copy_file_folder(self, console: Console) -> None:
+        console.clear()
+        console.rule("[bold cyan]COPY FILE/FOLDER[/]")
+        current_dir = get_project_path()
+
+        source = Prompt.ask("Enter source path").strip()
+        source = source if os.path.isabs(source) else os.path.join(current_dir, source)
+
+        if not os.path.exists(source):
+            console.print(f"[red]❌ Source not found:[/] {source}")
+            return
+
+        dest_suggestion = f"copy_of_{os.path.basename(source)}"
+        dest = Prompt.ask("Enter destination path", default=dest_suggestion).strip()
+        dest = dest if os.path.isabs(dest) else os.path.join(current_dir, dest)
+
+        if os.path.exists(dest) and not Confirm.ask("[yellow]Destination exists. Overwrite?[/]"):
+            return
+
+        if Confirm.ask(f"Confirm copy to {os.path.basename(dest)}?"):
+            with console.status("[cyan]Copying...[/]"):
+                try:
+                    if os.path.isfile(source): shutil.copy2(source, dest)
+                    else: shutil.copytree(source, dest, dirs_exist_ok=True)
+                    console.print("✅ [green]Copied successfully![/]")
+                except Exception as e:
+                    console.print(f"[red]❌ Copy failed: {e}[/]")
+
+    def _move_file_folder(self, console: Console) -> None:
+        console.clear()
+        console.rule("[bold cyan]MOVE FILE/FOLDER[/]")
+        current_dir = get_project_path()
+
+        source = Prompt.ask("Enter source path").strip()
+        source = source if os.path.isabs(source) else os.path.join(current_dir, source)
+
+        if not os.path.exists(source):
+            console.print("[red]❌ Source not found.[/]")
+            return
+
+        dest_dir = Prompt.ask("Enter destination directory").strip()
+        dest_dir = dest_dir if os.path.isabs(dest_dir) else os.path.join(current_dir, dest_dir)
+
+        if not os.path.exists(dest_dir) and Confirm.ask("Directory doesn't exist. Create it?"):
+            os.makedirs(dest_dir, exist_ok=True)
+
+        dest = os.path.join(dest_dir, os.path.basename(source))
+
+        if Confirm.ask(f"Confirm move to {dest_dir}?"):
+            with console.status("[cyan]Moving...[/]"):
+                try:
+                    shutil.move(source, dest)
+                    console.print("✅ [green]Moved successfully![/]")
+                except Exception as e:
+                    console.print(f"[red]❌ Move failed: {e}[/]")
+
+    def _delete_file_folder(self, console: Console) -> None:
+        console.clear()
+        console.rule("[bold red]DELETE FILE/FOLDER[/]")
+        current_dir = get_project_path()
+
+        target = Prompt.ask("Enter path to delete").strip()
+        target = target if os.path.isabs(target) else os.path.join(current_dir, target)
+
+        if not os.path.exists(target):
+            console.print("[red]❌ Path not found.[/]")
+            return
+
+        is_file = os.path.isfile(target)
+        size = self._get_path_size(target)
+
+        info = f"[bold]Path:[/] {target}\n[bold]Type:[/] {'File' if is_file else 'Folder'}\n[bold]Size:[/] {format_size(size)}"
+        console.print(Panel(info, border_style="yellow"))
+
+        important_paths = [os.path.expanduser("~"), "/", "C:\\", os.getcwd()]
+        if any(target == p for p in important_paths):
+            console.print("\n[bold red]⚠️ DANGER: You are trying to delete a critical system/project path![/]")
+            if Prompt.ask("Type 'YES' to force delete") != "YES":
+                return
+
+        if Confirm.ask("[bold red]Are you absolutely sure you want to delete this?[/]"):
+            with console.status("[red]Deleting...[/]"):
+                try:
+                    if is_file: os.remove(target)
+                    else: shutil.rmtree(target, ignore_errors=True)
+                    console.print(f"✅ [green]Deleted:[/] {target}")
+                except Exception as e:
+                    console.print(f"[red]❌ Deletion failed: {e}[/]")
+
+    def _file_info(self, console: Console) -> None:
+        console.clear()
+        console.rule("[bold cyan]FILE INFORMATION[/]")
+        target = Prompt.ask("Enter path").strip()
+        
+        if not os.path.exists(target):
+            console.print("[red]❌ Path not found.[/]")
+            return
+
+        path_obj = Path(target)
+        size = self._get_path_size(target)
+        
+        table = Table(show_header=False, box=None)
+        table.add_column("Key", style="bold cyan")
+        table.add_column("Value")
+        
+        table.add_row("Name:", path_obj.name)
+        table.add_row("Type:", "File" if path_obj.is_file() else "Folder")
+        table.add_row("Size:", f"{format_size(size)} ({size:,} bytes)")
+        table.add_row("Created:", time.ctime(os.path.getctime(target)))
+        table.add_row("Modified:", time.ctime(os.path.getmtime(target)))
+        
+        console.print(Panel(table, title="ℹ️ Details", expand=False))
+
+    def _create_folder(self, console: Console) -> None:
+        console.clear()
+        console.rule("[bold cyan]CREATE FOLDER[/]")
+        current_dir = get_project_path()
+
+        name = Prompt.ask("Enter folder name").strip()
+        path = name if os.path.isabs(name) else os.path.join(current_dir, name)
+
+        if os.path.exists(path):
+            console.print("[yellow]⚠️ Folder already exists.[/]")
+            return
+
+        try:
+            os.makedirs(path, exist_ok=True)
+            console.print(f"✅ [green]Folder created:[/] {path}")
+            if Confirm.ask("Create README.md inside?"):
+                with open(os.path.join(path, "README.md"), "w") as f:
+                    f.write(f"# {os.path.basename(name)}\n")
+                console.print("✅ [green]README.md created.[/]")
+        except Exception as e:
+            console.print(f"[red]❌ Failed: {e}[/]")
+
+    def _create_file(self, console: Console) -> None:
+        console.clear()
+        console.rule("[bold cyan]CREATE FILE[/]")
+        current_dir = get_project_path()
+
+        name = Prompt.ask("Enter file name (with ext)").strip()
+        path = name if os.path.isabs(name) else os.path.join(current_dir, name)
+
+        if os.path.exists(path) and not Confirm.ask("[yellow]File exists. Overwrite?[/]"):
+            return
+
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+
+        content_choice = Prompt.ask("Content [1] Empty [2] Template", choices=["1", "2"], default="2")
+        content = self._get_file_template(os.path.splitext(name)[1].lower(), os.path.basename(name)) if content_choice == "2" else ""
+
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content.strip())
+            console.print(f"✅ [green]File created:[/] {path}")
+        except Exception as e:
+            console.print(f"[red]❌ Failed: {e}[/]")
+
+    def _get_file_template(self, extension: str, filename: str) -> str:
+        name = os.path.splitext(filename)[0]
+        templates = {
+            ".py": f'def main():\n    print("Hello from {name}")\n\nif __name__ == "__main__":\n    main()',
+            ".html": f'<!DOCTYPE html>\n<html>\n<head><title>{name}</title></head>\n<body><h1>{name}</h1></body>\n</html>',
+            ".js": f'console.log("{name} loaded");',
+            ".md": f'# {name}\n\nDescription here.',
+            ".json": '{\n    "key": "value"\n}'
+        }
+        return templates.get(extension, "")
+
+    @staticmethod
+    def _get_path_size(path: str) -> int:
+        if os.path.isfile(path): return os.path.getsize(path)
+        return sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(path) for f in fs if os.path.exists(os.path.join(d, f)))
+
+    @staticmethod
+    def _copy_to_clipboard(text: str) -> bool:
+        try:
+            import pyperclip
+            pyperclip.copy(text)
+            return True
+        except: return False
+
+============================================================
+📄 FILE: src\mytools\tools\__init__.py
+============================================================
+"""Tool plugin loader – fallback if entry points not used."""
+from pathlib import Path
+import importlib.util
+import inspect
+import sys
+from .base import BaseTool
+
+def discover_tools(tool_dir=None):
+    """Scan tools directory and load all subclasses of BaseTool."""
+    if tool_dir is None:
+        tool_dir = Path(__file__).parent
+    tools = {}
+    for file in tool_dir.glob("*.py"):
+        if file.name == "__init__.py" or file.name == "base.py":
+            continue
+        module_name = f"mytools.tools.{file.stem}"
+        spec = importlib.util.spec_from_file_location(module_name, file)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            for name, obj in inspect.getmembers(module):
+                if (inspect.isclass(obj) and issubclass(obj, BaseTool)
+                        and obj != BaseTool):
+                    tools[file.stem] = obj
+    return tools
+
+============================================================
+📄 FILE: tests\conftest.py
+============================================================
+"""Pytest configuration and fixtures."""
+import pytest
+import tempfile
+import os
+from pathlib import Path
+from typer.testing import CliRunner
+
+@pytest.fixture
+def cli_runner():
+    """Provide a Typer CLI test runner."""
+    return CliRunner()
+
+@pytest.fixture
+def temp_project():
+    """Create a temporary project directory for testing."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        old_cwd = os.getcwd()
+        os.chdir(tmpdir)
+        yield Path(tmpdir)
+        os.chdir(old_cwd)
+
+@pytest.fixture
+def sample_pycache_folder(temp_project):
+    """Create a sample __pycache__ folder with files."""
+    pycache = temp_project / "__pycache__"
+    pycache.mkdir()
+    (pycache / "test.pyc").write_text("test content")
+    (pycache / "module.pyc").write_text("module content")
+    return pycache
+
+============================================================
+📄 FILE: tests\test_cli.py
+============================================================
+"""Test CLI commands and plugins."""
+import pytest
+from typer.testing import CliRunner
+from mytools.cli import app
+
+def test_cli_help(cli_runner):
+    """Test that CLI help works."""
+    result = cli_runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "MyTools" in result.stdout
+    assert "Commands" in result.stdout
+
+def test_list_command(cli_runner):
+    """Test list command shows all tools along with descriptions."""
+    result = cli_runner.invoke(app, ["list"])
+    assert result.exit_code == 0
+    assert "clean-pycache" in result.stdout
+    assert "django" in result.stdout
+    assert "env" in result.stdout
+    # each entry should also include a dash description separator
+    assert "–" in result.stdout
+
+
+def test_plugin_help_contains_description(cli_runner):
+    """Each plugin command should show its description in help text."""
+    # iterate through loaded plugins and verify description appears
+    from mytools.cli import _plugins
+    for name, tool_class in _plugins.items():
+        tool_instance = tool_class()
+        result = cli_runner.invoke(app, [name, "--help"])
+        assert result.exit_code == 0, f"help failed for {name}"
+        assert tool_instance.description.split()[0] in result.stdout
+        # verify flags for specific tools
+        if name == "clean-pycache":
+            assert "--yes" in result.stdout
+            assert "--no-pause" in result.stdout
+
+
+def test_clean_cache_yes_flag(cli_runner, tmp_path, monkeypatch):
+    """Calling clean-pycache with --yes should work without prompt."""
+    # prepare fake project with __pycache__ folder
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "__pycache__").mkdir()
+    result = cli_runner.invoke(app, ["clean-pycache", "--yes", "--no-pause", "--no-pause"])
+    assert result.exit_code == 0
+    # ensure the directory was removed
+    assert not (tmp_path / "__pycache__").exists()
+
+def test_global_debug_flag_sets_logger(cli_runner):
+    """Providing --debug should adjust logging level to DEBUG."""
+    # use list command as harmless subcommand
+    result = cli_runner.invoke(app, ["--debug", "list"])
+    assert result.exit_code == 0
+    from mytools.utils import logger as util_logger
+    import logging
+    assert util_logger.level == logging.DEBUG
+
+
+def test_global_log_level_option(cli_runner):
+    """--log-level should accept a level string and configure logger."""
+    result = cli_runner.invoke(app, ["--log-level", "warning", "list"])
+    assert result.exit_code == 0
+    from mytools.utils import logger as util_logger
+    import logging
+    assert util_logger.level == logging.WARNING
+def test_info_command(cli_runner):
+    """Test info command shows system information."""
+    result = cli_runner.invoke(app, ["info"])
+    assert result.exit_code == 0
+    assert "MyTools version" in result.stdout
+    assert "Python" in result.stdout
+
+def test_invalid_command(cli_runner):
+    """Test invalid command shows error."""
+    result = cli_runner.invoke(app, ["invalid-command"])
+    assert result.exit_code != 0
+
+============================================================
+📄 FILE: tests\test_tools\test_clean_pycache.py
+============================================================
+"""Test clean_pycache tool."""
+import pytest
+import os
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+from mytools.tools.clean_pycache import CleanPycacheTool
+from mytools.utils import format_size
+
+class TestCleanPycacheTool:
+    """Test cases for CleanPycacheTool."""
+    
+    @pytest.fixture
+    def tool(self):
+        """Return a fresh instance of CleanPycacheTool."""
+        return CleanPycacheTool()
+
+    def test_folder_size_calculation(self, tool, sample_pycache_folder):
+        """Test that folder size is calculated correctly."""
+        size = tool._folder_size(sample_pycache_folder)
+        assert size > 0
+        assert size == len("test content") + len("module content")
+    
+    def test_folder_size_empty_folder(self, tool, temp_project):
+        """Test empty folder returns 0 size."""
+        empty_folder = temp_project / "empty"
+        empty_folder.mkdir()
+        size = tool._folder_size(empty_folder)
+        assert size == 0
+    
+    def test_folder_size_nonexistent(self, tool, temp_project):
+        """Test nonexistent folder returns 0."""
+        nonexistent = temp_project / "does_not_exist"
+        size = tool._folder_size(nonexistent)
+        assert size == 0
+    
+    def test_format_size_bytes(self):
+        """Test format_size with bytes."""
+        assert format_size(500) == "500.00 B"
+    
+    def test_format_size_kilobytes(self):
+        """Test format_size with KB."""
+        assert format_size(1024) == "1.00 KB"
+        assert format_size(2048) == "2.00 KB"
+    
+    def test_format_size_megabytes(self):
+        """Test format_size with MB."""
+        assert format_size(1048576) == "1.00 MB"
+        assert format_size(2097152) == "2.00 MB"
+    
+    def test_format_size_gigabytes(self):
+        """Test format_size with GB."""
+        assert format_size(1073741824) == "1.00 GB"
+    
+    @patch("mytools.tools.clean_pycache.get_project_path")
+    @patch("mytools.tools.clean_pycache.Console")
+    @patch("mytools.tools.clean_pycache.logger")
+    def test_permission_error_handling(self, mock_logger, mock_console_cls, mock_get_path, tool, temp_project):
+        """Test handling of permission errors gracefully without skipping."""
+        mock_get_path.return_value = str(temp_project)
+        
+        # Setup mock console to auto-confirm deletion
+        mock_console = MagicMock()
+        mock_console_cls.return_value = mock_console
+        mock_console.input.return_value = "y"
+        
+        # Create a fake __pycache__ directory
+        pycache_dir = temp_project / "__pycache__"
+        pycache_dir.mkdir()
+        
+        # Mock shutil.rmtree to raise an exception simulating a PermissionError
+        with patch("mytools.tools.clean_pycache.shutil.rmtree", side_effect=PermissionError("Access Denied")):
+            tool.run(yes=False)
+            
+        # Verify that the tool caught the exception and logged it properly
+        assert mock_logger.error.called
+        assert "Failed to delete" in mock_logger.error.call_args[0][0]
+        
+    @patch("mytools.tools.clean_pycache.get_project_path")
+    @patch("mytools.tools.clean_pycache.Console")
+    def test_run_cancel_deletion(self, mock_console_cls, mock_get_path, tool, temp_project):
+        """Test user cancelling the deletion; scanner should not run."""
+        mock_get_path.return_value = str(temp_project)
+        
+        # Setup mock console to auto-cancel deletion
+        mock_console = MagicMock()
+        mock_console_cls.return_value = mock_console
+        mock_console.input.return_value = "n"
+        
+        with patch("os.walk") as mock_walk:
+            tool.run(yes=False)
+            mock_walk.assert_not_called()
+        
+        # Verify that cancellation message was printed and no 'no folders' info
+        mock_console.print.assert_any_call("[red]❌ Operation cancelled.[/]")
+        assert not any("No __pycache__" in str(call) for call in mock_console.print.call_args_list)
+    
+    @patch("mytools.tools.clean_pycache.get_project_path")
+    @patch("mytools.tools.clean_pycache.Console")
+    def test_run_with_yes_flag(self, mock_console_cls, mock_get_path, tool, temp_project):
+        """Providing the --yes flag should skip confirmation prompt."""
+        mock_get_path.return_value = str(temp_project)
+        mock_console = MagicMock()
+        mock_console_cls.return_value = mock_console
+        # no need to set input because yes bypasses it
+        # create dummy cache folder
+        pycache_dir = temp_project / "__pycache__"
+        pycache_dir.mkdir()
+        
+        # track calls to rmtree
+        with patch("mytools.tools.clean_pycache.shutil.rmtree") as mock_rmtree:
+            tool.run(yes=True)
+            mock_rmtree.assert_called_once()
+            # ensure no cancellation message printed
+            assert not any("Operation cancelled" in str(call) for call in mock_console.print.call_args_list)
+        
+
+============================================================
+📄 FILE: tests\test_tools\test_context_generator.py
+============================================================
+import os
+import pytest
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+# Apne actual path ke hisab se import adjust kar lena
+from mytools.tools.context_generator import FullContextTool
+
+@pytest.fixture
+def mock_project(tmp_path):
+    """
+    Ek fake project structure create karta hai testing ke liye.
+    """
+    # Important files
+    (tmp_path / "main.py").write_text("def main():\n    print('Hello World')")
+    (tmp_path / "README.md").write_text("# Mock Project")
+    
+    # Ignored files (logs, temp)
+    (tmp_path / "app.log").write_text("Error: something failed")
+    
+    # Ignored directory (.git)
+    git_dir = tmp_path / ".git"
+    git_dir.mkdir()
+    (git_dir / "config").write_text("[core]\nrepositoryformatversion = 0")
+    
+    # Sub-directory
+    utils_dir = tmp_path / "utils"
+    utils_dir.mkdir()
+    (utils_dir / "helper.py").write_text("def help(): return True")
+
+    # get_project_path ko is temporary directory par point karte hain
+    with patch("mytools.tools.context_generator.get_project_path", return_value=str(tmp_path)):
+        yield tmp_path
+
+@pytest.fixture
+def tool():
+    """Tool ka ek fresh instance return karta hai."""
+    return FullContextTool()
+
+def test_generate_tree(tool, mock_project):
+    """Test karta hai ki file tree properly ban raha hai aur ignored files/folders hide ho rahe hain."""
+    ignore_dirs = tool.DEFAULT_IGNORE_DIRS
+    
+    tree_output = tool._generate_tree(str(mock_project), ignore_dirs)
+    
+    # Jo dikhna chahiye
+    assert "main.py" in tree_output
+    assert "README.md" in tree_output
+    assert "utils" in tree_output
+    assert "helper.py" in tree_output
+    
+    # Jo hide hona chahiye (.git)
+    assert ".git" not in tree_output
+
+def test_get_smart_files_content(tool, mock_project):
+    """Test karta hai ki 'smart' mode sirf zaroori files ko read karta hai."""
+    config = {
+        'ignore_dirs': tool.DEFAULT_IGNORE_DIRS,
+        'ignore_files': tool.DEFAULT_IGNORE_FILES,
+        'max_file_size': 10000,
+        'max_total_size': 50000
+    }
+    
+    content = tool._get_smart_files_content(str(mock_project), config)
+    
+    # Code aur docs aane chahiye
+    assert "def main():" in content
+    assert "# Mock Project" in content
+    assert "def help():" in content
+    
+    # Log files hide honi chahiye
+    assert "Error: something failed" not in content
+
+def test_get_user_config(tool):
+    """Test karta hai ki user config properly generate ho rahi hai custom inputs ke sath."""
+    console = MagicMock()
+    
+    # User prompts ko sequence mein mock kar rahe hain:
+    # 1. Mode choice -> '2' (All files)
+    # 2. Add ignore dirs -> 'custom_folder'
+    # 3. Add ignore files -> '*.csv'
+    with patch("rich.prompt.Prompt.ask", side_effect=["2", "custom_folder", "*.csv"]):
+        config = tool._get_user_config(console)
+        
+        assert config['selection_mode'] == 'all'
+        assert "custom_folder" in config['ignore_dirs']
+        assert "*.csv" in config['ignore_files']
+
+def test_handle_save_options(tool, mock_project):
+    """Test karta hai ki context file successfully save ho rahi hai."""
+    console = MagicMock()
+    fake_content = "This is fake project context"
+    save_file_path = mock_project / "output_context.txt"
+    
+    # User prompts:
+    # 1. Choose option -> '1' (Save full context)
+    # 2. Enter filename -> "output_context.txt"
+    with patch("rich.prompt.Prompt.ask", side_effect=["1", str(save_file_path)]):
+        tool._handle_save_options(console, "TestProject", fake_content)
+        
+        # Verify file is created and contains correct data
+        assert save_file_path.exists()
+        assert save_file_path.read_text() == fake_content
+
+def test_run_full_tool_flow(tool, mock_project):
+    """Test karta hai ki poora tool start se le kar end tak bina crash hue chal raha hai."""
+    # Prompts ka poora safar:
+    # Mode -> '1' (Smart)
+    # Custom dirs -> '' (None)
+    # Custom files -> '' (None)
+    # Save option -> '4' (Don't save)
+    with patch("rich.prompt.Prompt.ask", side_effect=["1", "", "", "4"]), \
+         patch("rich.console.Console.input", return_value=""), \
+         patch("rich.console.Console.clear"):
+        
+        # Agar ye bina exception ke chal gaya, matlab CLI run method theek hai
+        tool.run()
+        
+
+============================================================
+📄 FILE: tests\test_tools\test_django_manager.py
+============================================================
+import os
+import pytest
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+# Apne project import paths ke hisab se adjust karein
+from mytools.tools.django_manager import (
+    DjangoTool, 
+    DjRunTool, 
+    DjMigrateTool, 
+    DjMakeMigrationsTool, 
+    DjAppTool
+)
+
+@pytest.fixture
+def mock_project(tmp_path):
+    """Temporary directory ko project root mock karta hai aur dummy manage.py banata hai."""
+    # Dummy manage.py banate hain taaki _find_django_project() function paas ho jaye
+    manage_py = tmp_path / "manage.py"
+    manage_py.write_text("# Dummy Django entry point")
+
+    # get_project_path ko is temporary folder pe point karte hain
+    with patch("mytools.tools.django_manager.get_project_path", return_value=str(tmp_path)):
+        # Test ke dauran current working directory bhi yahi set kar dete hain
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        yield tmp_path
+        os.chdir(old_cwd)
+
+@pytest.fixture
+def tool():
+    """DjangoTool ka instance return karta hai."""
+    return DjangoTool()
+
+# =====================================================================
+# CORE METHODS TESTING
+# =====================================================================
+
+def test_create_project(tool, mock_project):
+    """Test create_project command execution."""
+    # Simulate user confirming (True) and typing project name "my_test_proj"
+    with patch("rich.prompt.Confirm.ask", return_value=True), \
+         patch("rich.prompt.Prompt.ask", return_value="my_test_proj"), \
+         patch.object(tool, "_run_command", return_value=(True, "Success")) as mock_run:
+        
+        tool.create_project()
+        
+        # Check if django-admin startproject was called properly
+        mock_run.assert_called_once_with(["django-admin", "startproject", "my_test_proj"])
+
+def test_create_app(tool, mock_project):
+    """Test create_app method within a django project."""
+    with patch("rich.prompt.Prompt.ask", return_value="my_app"), \
+         patch.object(tool, "_run_command", return_value=(True, "Success")) as mock_run:
+        
+        tool.create_app()
+        
+        # Verify call contains 'startapp' and 'my_app'
+        args = mock_run.call_args[0][0]
+        assert "startapp" in args
+        assert "my_app" in args
+
+def test_make_migrations(tool, mock_project):
+    """Test make_migrations method."""
+    # Simulate user leaving app name empty (for all apps)
+    with patch("rich.prompt.Prompt.ask", return_value=""), \
+         patch.object(tool, "_run_command", return_value=(True, "Success")) as mock_run:
+        
+        tool.make_migrations()
+        
+        args = mock_run.call_args[0][0]
+        assert "makemigrations" in args
+        # Check that it didn't pass an app name since user left it empty
+        assert len(args) == 3 
+
+def test_migrate(tool, mock_project):
+    """Test migrate method."""
+    with patch("rich.prompt.Confirm.ask", return_value=True), \
+         patch.object(tool, "_run_command", return_value=(True, "Success")) as mock_run:
+        
+        tool.migrate()
+        
+        args = mock_run.call_args[0][0]
+        assert "migrate" in args
+
+def test_run_server(tool, mock_project):
+    """Test run_server method."""
+    # runserver uses subprocess.run directly instead of _run_command due to KeyboardInterrupt logic
+    with patch("rich.prompt.Prompt.ask", return_value="8080"), \
+         patch("subprocess.run") as mock_subprocess:
+        
+        tool.run_server()
+        
+        # Verify subprocess.run was called with correct port
+        args = mock_subprocess.call_args[0][0]
+        assert "runserver" in args
+        assert "127.0.0.1:8080" in args
+
+
+def test_run_pause_flag(monkeypatch, tool):
+    """When pause is False, the console input prompt should not be called."""
+    fake_console = MagicMock()
+    fake_console.input = MagicMock()
+    monkeypatch.setattr("mytools.tools.django_manager.console", fake_console)
+    # avoid actual project creation/migrations etc
+    monkeypatch.setattr(tool, "create_project", lambda: None)
+    monkeypatch.setattr(tool, "check_django", lambda: None)
+    monkeypatch.setattr(tool, "create_app", lambda: None)
+    monkeypatch.setattr(tool, "make_migrations", lambda: None)
+    monkeypatch.setattr(tool, "migrate", lambda: None)
+    monkeypatch.setattr(tool, "run_server", lambda: None)
+    
+    # simulate first choice '1' then exit '7'
+    choices = iter(["1", "7"])
+    monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *args, **kwargs: next(choices))
+
+    tool.run(pause=False)
+    assert not fake_console.input.called
+
+
+def test_run_default_pause(monkeypatch, tool):
+    """With default pause=True, console.input should be called once when an action runs."""
+    fake_console = MagicMock()
+    fake_console.input = MagicMock()
+    monkeypatch.setattr("mytools.tools.django_manager.console", fake_console)
+    monkeypatch.setattr(tool, "create_project", lambda: None)
+    monkeypatch.setattr(tool, "check_django", lambda: None)
+    monkeypatch.setattr(tool, "create_app", lambda: None)
+    monkeypatch.setattr(tool, "make_migrations", lambda: None)
+    monkeypatch.setattr(tool, "migrate", lambda: None)
+    monkeypatch.setattr(tool, "run_server", lambda: None)
+    # provide two choices so the menu executes one iteration then exits
+    choices = iter(["1", "7"])
+    monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *args, **kwargs: next(choices))
+
+    tool.run()
+    assert fake_console.input.called
+
+# =====================================================================
+# SHORTCUT CLI TOOLS TESTING
+# =====================================================================
+
+def test_dj_run_shortcut():
+    """Test that DjRunTool directly calls DjangoTool.run_server"""
+    shortcut = DjRunTool()
+    with patch("mytools.tools.django_manager.DjangoTool.run_server") as mock_method:
+        shortcut.run()
+        mock_method.assert_called_once()
+
+def test_dj_migrate_shortcut():
+    """Test DjMigrateTool shortcut"""
+    shortcut = DjMigrateTool()
+    with patch("mytools.tools.django_manager.DjangoTool.migrate") as mock_method:
+        shortcut.run()
+        mock_method.assert_called_once()
+
+def test_dj_makemigrations_shortcut():
+    """Test DjMakeMigrationsTool shortcut"""
+    shortcut = DjMakeMigrationsTool()
+    with patch("mytools.tools.django_manager.DjangoTool.make_migrations") as mock_method:
+        shortcut.run()
+        mock_method.assert_called_once()
+
+def test_dj_app_shortcut():
+    """Test DjAppTool shortcut"""
+    shortcut = DjAppTool()
+    with patch("mytools.tools.django_manager.DjangoTool.create_app") as mock_method:
+        shortcut.run()
+        mock_method.assert_called_once()
+
+        
+
+============================================================
+📄 FILE: tests\test_tools\test_env_manager.py
+============================================================
+"""Test env_manager tool."""
+import pytest
+import os
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+from mytools.tools.env_manager import EnvTool
+
+class TestEnvTool:
+    """Test cases for EnvTool."""
+
+    @pytest.fixture
+    def tool(self):
+        """Return an instance of EnvTool."""
+        return EnvTool()
+
+    def test_create_env_file_success(self, tool, temp_project):
+        """Test successful .env file creation when it does not exist."""
+        env_file = temp_project / ".env"
+        
+        # Mock 'Show file preview?' input with 'n'
+        with patch("mytools.tools.env_manager.console.input", return_value="n"):
+            tool._create_env_file()
+            
+        assert env_file.exists()
+        content = env_file.read_text(encoding='utf-8')
+        assert "DJANGO_SECRET_KEY" in content
+        assert "DB_NAME=your_database_name" in content
+
+    def test_create_env_file_exists_no_overwrite(self, tool, temp_project):
+        """Test .env file creation when it exists and user chooses not to overwrite."""
+        env_file = temp_project / ".env"
+        env_file.write_text("OLD_CONTENT=true", encoding='utf-8')
+        
+        # Mock 'Overwrite? (y/n): ' input with 'n'
+        with patch("mytools.tools.env_manager.console.input", return_value="n"):
+            tool._create_env_file()
+            
+        # Ensure old content is still there
+        assert env_file.read_text(encoding='utf-8') == "OLD_CONTENT=true"
+
+    def test_delete_env_file_success(self, tool, temp_project):
+        """Test successful .env file deletion."""
+        env_file = temp_project / ".env"
+        env_file.write_text("TEST=1", encoding='utf-8')
+        
+        # Mock inputs: 1. 'Show file preview?' -> 'n', 2. 'Delete .env file? (y/N)' -> 'y'
+        with patch("mytools.tools.env_manager.console.input", side_effect=["n", "y"]):
+            tool._delete_env_file()
+            
+        assert not env_file.exists()
+
+    def test_delete_env_file_cancel(self, tool, temp_project):
+        """Test cancelling .env file deletion."""
+        env_file = temp_project / ".env"
+        env_file.write_text("TEST=1", encoding='utf-8')
+        
+        # Mock inputs: 1. 'Show preview?' -> 'n', 2. 'Delete?' -> 'n'
+        with patch("mytools.tools.env_manager.console.input", side_effect=["n", "n"]):
+            tool._delete_env_file()
+            
+        assert env_file.exists()
+
+    @patch("mytools.tools.env_manager.EnvTool._run_command")
+    def test_create_venv_default(self, mock_run, tool, temp_project):
+        """Test virtual environment creation (.venv)."""
+        mock_run.return_value = (True, "Success")
+        
+        # Mock 'Select option (1-3): ' input with '1' (for .venv)
+        # And mock 'Install from requirements.txt?' with 'n' (if it asks)
+        with patch("mytools.tools.env_manager.console.input", side_effect=["1", "n"]):
+            tool._create_venv()
+            
+        mock_run.assert_called_once()
+        args = mock_run.call_args[0][0]
+        assert "venv" in args
+        assert ".venv" in args
+
+    def test_delete_venv_success(self, tool, temp_project):
+        """Test deleting an existing virtual environment."""
+        # Create fake venv structure
+        venv_dir = temp_project / ".venv"
+        venv_dir.mkdir()
+        (venv_dir / "dummy.txt").write_text("dummy content", encoding='utf-8')
+        
+        # Mock input for 'Are you sure you want to delete?' -> 'y'
+        with patch("mytools.tools.env_manager.console.input", return_value="y"):
+            tool._delete_venv()
+            
+        assert not venv_dir.exists()
+
+    def test_delete_venv_cancel(self, tool, temp_project):
+        """Test cancelling the deletion of an existing virtual environment."""
+        venv_dir = temp_project / ".venv"
+        venv_dir.mkdir()
+        
+        # Mock input for 'Are you sure you want to delete?' -> 'n'
+        with patch("mytools.tools.env_manager.console.input", return_value="n"):
+            tool._delete_venv()
+            
+        assert venv_dir.exists()
+
+        
+
+============================================================
+📄 FILE: tests\test_tools\test_file_counter.py
+============================================================
+"""Test file_counter tool."""
+import pytest
+import os
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+from mytools.tools.file_counter import FileCounterTool
+
+class TestFileCounterTool:
+    """Test cases for FileCounterTool."""
+
+    @pytest.fixture
+    def tool(self):
+        """Return a fresh instance of FileCounterTool."""
+        return FileCounterTool()
+
+    @patch("mytools.tools.file_counter.get_project_path")
+    @patch("mytools.tools.file_counter.console")
+    def test_run_counts_files_correctly(self, mock_console, mock_get_path, tool, temp_project):
+        """Test that the tool correctly counts files and their sizes."""
+        # Setup mock environment
+        mock_get_path.return_value = str(temp_project)
+        mock_console.input.return_value = ""  # Mock the 'Press Enter' pause
+        
+        # Create dummy files with specific sizes
+        (temp_project / "script1.py").write_text("print('hello')", encoding="utf-8")
+        (temp_project / "script2.py").write_text("print('world')", encoding="utf-8")
+        (temp_project / "style.css").write_text("body { color: red; }", encoding="utf-8")
+        
+        # Execute tool
+        tool.run()
+        
+        # Verify UI methods were called properly
+        mock_console.clear.assert_called_once()
+        mock_console.rule.assert_called_once()
+        assert mock_console.print.called
+
+    @patch("mytools.tools.file_counter.get_project_path")
+    @patch("mytools.tools.file_counter.console")
+    def test_ignored_directories_are_skipped(self, mock_console, mock_get_path, tool, temp_project):
+        """Test that ignored directories like node_modules and .venv are skipped."""
+        mock_get_path.return_value = str(temp_project)
+        mock_console.input.return_value = ""
+        
+        # Create an ignored directory and put a file in it
+        ignored_dir = temp_project / "node_modules"
+        ignored_dir.mkdir()
+        (ignored_dir / "hidden.js").write_text("console.log('hidden')", encoding="utf-8")
+        
+        # Create a regular file
+        (temp_project / "main.py").write_text("print('main')", encoding="utf-8")
+        
+        tool.run()
+        
+        # Tool should complete without crashing and skip the ignored folder
+        assert mock_console.print.called
+
+    @patch("mytools.tools.file_counter.get_project_path")
+    @patch("mytools.tools.file_counter.console")
+    def test_unreadable_file_handled_gracefully(self, mock_console, mock_get_path, tool, temp_project):
+        """Test that files raising OSError on getsize do not crash the tool."""
+        mock_get_path.return_value = str(temp_project)
+        mock_console.input.return_value = ""
+        
+        # Create a regular file
+        test_file = temp_project / "unreadable.txt"
+        test_file.write_text("secret", encoding="utf-8")
+        
+        original_getsize = os.path.getsize
+        
+        # Mock os.path.getsize to raise OSError specifically for this file
+        def mock_getsize(filepath):
+            if "unreadable.txt" in str(filepath):
+                raise OSError("Permission denied")
+            return original_getsize(filepath)
+            
+        with patch("os.path.getsize", side_effect=mock_getsize):
+            tool.run()
+            
+        # Tool should catch the OSError and complete without crashing
+        assert mock_console.print.called
+
+    @patch("mytools.tools.file_counter.get_project_path")
+    @patch("mytools.tools.file_counter.console")
+    def test_empty_directory(self, mock_console, mock_get_path, tool, temp_project):
+        """Test tool behavior on a completely empty project directory."""
+        mock_get_path.return_value = str(temp_project)
+        mock_console.input.return_value = ""
+        
+        # Execute tool on empty temp_project
+        tool.run()
+        
+        # Should execute perfectly without errors
+        assert mock_console.print.called
+
+        
+
+============================================================
+📄 FILE: tests\test_tools\test_file_ops.py
+============================================================
+import os
+import pytest
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+# Note: Yahan import path apne project ke structure ke hisab se adjust kar lena
+# Example: from mytools.tools.file_ops_tool import FileOperationsTool
+from mytools.tools.file_ops import FileOperationsTool
+
+
+@pytest.fixture
+def mock_project_path(tmp_path):
+    """Temporary directory ko project path ki tarah mock karta hai."""
+    # Slashes (/) ki jagah Dots (.) use karne hain, aur sahi module ko point karna hai.
+    with patch("mytools.tools.file_ops.get_project_path", return_value=str(tmp_path)):
+        yield str(tmp_path)
+
+@pytest.fixture
+def tool():
+    """Tool ka instance return karta hai."""
+    return FileOperationsTool()
+
+@pytest.fixture
+def mock_console():
+    """Console clears aur prints ko mock karta hai taaki test output clean rahe."""
+    with patch("rich.console.Console.clear"), patch("rich.console.Console.print"), patch("rich.console.Console.rule"):
+        yield
+
+def test_menu_exit(tool, mock_console):
+    """Test karta hai ki '8' dabane par menu gracefully exit hota hai."""
+    with patch("rich.prompt.Prompt.ask", return_value="8"):
+        tool.run()  # Loop break ho jayega aur test pass ho jayega
+
+def test_create_folder(tool, mock_project_path, mock_console):
+    """Test karta hai ki naya folder aur uske andar README.md properly create hota hai."""
+    folder_name = "test_directory"
+    
+    # Prompt.ask ko "test_directory" return karne ke liye mock kiya
+    # Confirm.ask ko True return karne ke liye mock kiya (Create README.md? -> Yes)
+    with patch("rich.prompt.Prompt.ask", return_value=folder_name), \
+         patch("rich.prompt.Confirm.ask", return_value=True):
+        
+        console = MagicMock()
+        tool._create_folder(console)
+        
+        created_dir = Path(mock_project_path) / folder_name
+        readme_file = created_dir / "README.md"
+        
+        assert created_dir.exists()
+        assert created_dir.is_dir()
+        assert readme_file.exists()
+        assert readme_file.read_text() == f"# {folder_name}\n"
+
+def test_create_file_with_template(tool, mock_project_path, mock_console):
+    """Test karta hai ki naya Python file template ke sath create hota hai."""
+    file_name = "script.py"
+    
+    # Sequence of prompts:
+    # 1. Enter file name -> "script.py"
+    # 2. Content choice -> "2" (Template)
+    with patch("rich.prompt.Prompt.ask", side_effect=[file_name, "2"]):
+        
+        console = MagicMock()
+        tool._create_file(console)
+        
+        created_file = Path(mock_project_path) / file_name
+        assert created_file.exists()
+        
+        content = created_file.read_text()
+        assert "def main():" in content
+        assert "print(\"Hello from script\")" in content
+
+def test_delete_file(tool, mock_project_path, mock_console):
+    """Test karta hai ki file successfully delete hoti hai jab user confirm karta hai."""
+    # Pehle ek temporary file banate hain
+    test_file = Path(mock_project_path) / "to_delete.txt"
+    test_file.write_text("dummy content")
+    assert test_file.exists()
+
+    # Prompts:
+    # 1. Enter path to delete -> "to_delete.txt"
+    # 2. Confirm deletion -> True
+    with patch("rich.prompt.Prompt.ask", return_value="to_delete.txt"), \
+         patch("rich.prompt.Confirm.ask", return_value=True):
+        
+        console = MagicMock()
+        tool._delete_file_folder(console)
+        
+        # Verify file is deleted
+        assert not test_file.exists()
+
+def test_copy_file(tool, mock_project_path, mock_console):
+    """Test karta hai ki ek file dusri jagah properly copy hoti hai."""
+    source_file = Path(mock_project_path) / "source.txt"
+    source_file.write_text("Hello World")
+    
+    dest_file_name = "dest.txt"
+    dest_file = Path(mock_project_path) / dest_file_name
+
+    # Prompts:
+    # 1. Enter source path -> "source.txt"
+    # 2. Enter dest path -> "dest.txt"
+    # 3. Confirm copy -> True
+    with patch("rich.prompt.Prompt.ask", side_effect=["source.txt", dest_file_name]), \
+         patch("rich.prompt.Confirm.ask", return_value=True):
+        
+        console = MagicMock()
+        tool._copy_file_folder(console)
+        
+        assert dest_file.exists()
+        assert dest_file.read_text() == "Hello World"
+
+        
+
+
+============================================================
+💡 FOR AI ASSISTANT:
+This is the complete context of the project. Please analyze the structure
+and code to provide accurate assistance. Key files include configuration
+files, source code, and documentation.
+
+When responding, reference specific files and paths from the structure above.
