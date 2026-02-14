@@ -96,6 +96,46 @@ def test_run_server(tool, mock_project):
         assert "runserver" in args
         assert "127.0.0.1:8080" in args
 
+
+def test_run_pause_flag(monkeypatch, tool):
+    """When pause is False, the console input prompt should not be called."""
+    fake_console = MagicMock()
+    fake_console.input = MagicMock()
+    monkeypatch.setattr("mytools.tools.django_manager.console", fake_console)
+    # avoid actual project creation/migrations etc
+    monkeypatch.setattr(tool, "create_project", lambda: None)
+    monkeypatch.setattr(tool, "check_django", lambda: None)
+    monkeypatch.setattr(tool, "create_app", lambda: None)
+    monkeypatch.setattr(tool, "make_migrations", lambda: None)
+    monkeypatch.setattr(tool, "migrate", lambda: None)
+    monkeypatch.setattr(tool, "run_server", lambda: None)
+    
+    # simulate first choice '1' then exit '7'
+    choices = iter(["1", "7"])
+    monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *args, **kwargs: next(choices))
+
+    tool.run(pause=False)
+    assert not fake_console.input.called
+
+
+def test_run_default_pause(monkeypatch, tool):
+    """With default pause=True, console.input should be called once when an action runs."""
+    fake_console = MagicMock()
+    fake_console.input = MagicMock()
+    monkeypatch.setattr("mytools.tools.django_manager.console", fake_console)
+    monkeypatch.setattr(tool, "create_project", lambda: None)
+    monkeypatch.setattr(tool, "check_django", lambda: None)
+    monkeypatch.setattr(tool, "create_app", lambda: None)
+    monkeypatch.setattr(tool, "make_migrations", lambda: None)
+    monkeypatch.setattr(tool, "migrate", lambda: None)
+    monkeypatch.setattr(tool, "run_server", lambda: None)
+    # provide two choices so the menu executes one iteration then exits
+    choices = iter(["1", "7"])
+    monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *args, **kwargs: next(choices))
+
+    tool.run()
+    assert fake_console.input.called
+
 # =====================================================================
 # SHORTCUT CLI TOOLS TESTING
 # =====================================================================

@@ -3,6 +3,7 @@ import os
 import shutil
 from pathlib import Path
 
+import typer
 from rich.progress import track
 from rich.console import Console
 
@@ -13,7 +14,15 @@ class CleanPycacheTool(BaseTool):
     name = "🧹 Clean __pycache__"
     description = "Remove all __pycache__ folders recursively"
 
-    def run(self) -> None:
+    def run(
+        self,
+        yes: bool = typer.Option(False, "--yes", "-y", help="Skip user confirmation"),
+        no_pause: bool = typer.Option(
+            False,
+            "--no-pause",
+            help="Don't prompt to press Enter at the end",
+        ),
+    ) -> None:
         # from ..cli import console  # lazy import to avoid circular
         console = Console()
 
@@ -23,9 +32,10 @@ class CleanPycacheTool(BaseTool):
         start_path = get_project_path()
         console.print(f"🔍 Cleaning in: [cyan]{start_path}[/]")
 
-        if not console.input("\n⚠️  [yellow]Delete all __pycache__ folders?[/] (y/n): ").lower() == "y":
-            console.print("[red]❌ Operation cancelled.[/]")
-            return
+        if not yes:
+            if not console.input("\n⚠️  [yellow]Delete all __pycache__ folders?[/] (y/n): ").lower() == "y":
+                console.print("[red]❌ Operation cancelled.[/]")
+                return
 
         deleted = 0
         total_size = 0
@@ -52,7 +62,12 @@ class CleanPycacheTool(BaseTool):
         else:
             console.print("\n[blue]ℹ️  No __pycache__ folders found.[/]")
 
-        console.input("\nPress Enter to continue...")
+        if not no_pause:
+            try:
+                console.input("\nPress Enter to continue...")
+            except Exception:
+                # non-interactive environment may raise EOFError
+                pass
 
     @staticmethod
     def _folder_size(path: Path) -> int:

@@ -11,15 +11,25 @@ from .config import settings
 console = Console()
 
 def setup_logging():
-    """Configure logging with Rich handler."""
+    """Configure logging with Rich handler.
+
+    Calling this multiple times will reconfigure the root logger.  ``basicConfig``
+    only has an effect once unless ``force=True`` (Python 3.8+).  We include that
+    flag to make it safe to call from the CLI callback when the log level is
+    changed at runtime.
+    """
     logging.basicConfig(
         level=settings.log_level,
         format="%(message)s",
         datefmt="[%X]",
         handlers=[RichHandler(rich_tracebacks=True, markup=True)],
+        force=True,
     )
-    return logging.getLogger("mytools")
+    log = logging.getLogger("mytools")
+    log.setLevel(settings.log_level)
+    return log
 
+# global logger instance; can be updated by re-invoking setup_logging()
 logger = setup_logging()
 
 def format_size(size_bytes: int) -> str:

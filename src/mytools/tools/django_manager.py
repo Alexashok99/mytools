@@ -6,6 +6,7 @@ import sys
 from typing import Tuple, Optional
 from pathlib import Path
 
+import typer
 from rich.prompt import Prompt, Confirm
 from rich.panel import Panel
 
@@ -18,7 +19,7 @@ class DjangoTool(BaseTool):
     name = "🚀 Django Manager"
     description = "Interactive menu to create project, apps, migrate, runserver"
 
-    def run(self) -> None:
+    def run(self, pause: bool = typer.Option(True, "--pause/--no-pause", help="Wait for Enter between steps")) -> None:
         """Display Django management menu."""
         while True:
             console.clear()
@@ -52,7 +53,7 @@ class DjangoTool(BaseTool):
             elif choice == "7":
                 break
 
-            if choice != "7":
+            if choice != "7" and pause:
                 console.input("\n[dim]Press Enter to continue...[/]")
 
     # ----------------------------------------------------------------

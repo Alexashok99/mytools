@@ -16,6 +16,34 @@ app = typer.Typer(
     rich_markup_mode="rich",
 )
 
+# Global callback for options that apply to all commands
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
+    log_level: Optional[str] = typer.Option(
+        None,
+        "--log-level",
+        "-l",
+        help="Set log level (DEBUG, INFO, WARNING, ERROR)",
+    ),
+):
+    """Common options applied before running any command."""
+    # configure logging early so downstream code respects level
+    if debug:
+        settings.log_level = "DEBUG"
+    elif log_level:
+        settings.log_level = log_level.upper()
+
+    # re-configure logger with new level
+    setup_logging()
+
+    # if no subcommand supplied, show help
+    if ctx.invoked_subcommand is None:
+        typer.echo(app.get_help())
+        raise typer.Exit()
+
+
 # ----------------------------------------------------------------------
 # Plugin: Dynamically load all tools from entry_points
 # ----------------------------------------------------------------------
@@ -46,24 +74,21 @@ for name, tool_class in _plugins.items():
     # Instantiate tool once (or you can lazy-load inside command)
     tool_instance = tool_class()
 
-    # Create a Typer command that calls tool.run()
-    def make_cmd(tool):
-        def cmd(ctx: typer.Context):
-            """Run the tool."""
-            tool.run()
-        return cmd
-
-    app.command(name=name)(make_cmd(tool_instance))
+    # register the `run` method directly; a bound method's signature
+    # excludes `self` so Typer can pick up any additional options defined
+    # there.  We still supply the description as help text.
+    app.command(name=name, help=tool_instance.description)(tool_instance.run)
 
 # ----------------------------------------------------------------------
 # Built‑in commands that don't need a plugin
 # ----------------------------------------------------------------------
 @app.command("list")
 def list_tools():
-    """📋 List all available tools."""
+    """📋 List all available tools with brief descriptions."""
     typer.echo("🔧 Available tools:\n")
-    for name in _plugins:
-        typer.echo(f"  • {name}")
+    for name, tool_class in _plugins.items():
+        desc = tool_class().description
+        typer.echo(f"  • {name} – {desc}")
     typer.echo("\nUse `mytools <tool-name>` to run a tool.")
 
 @app.command("info")

@@ -69,7 +69,7 @@ class TestCleanPycacheTool:
         
         # Mock shutil.rmtree to raise an exception simulating a PermissionError
         with patch("mytools.tools.clean_pycache.shutil.rmtree", side_effect=PermissionError("Access Denied")):
-            tool.run()
+            tool.run(yes=False)
             
         # Verify that the tool caught the exception and logged it properly
         assert mock_logger.error.called
@@ -78,7 +78,7 @@ class TestCleanPycacheTool:
     @patch("mytools.tools.clean_pycache.get_project_path")
     @patch("mytools.tools.clean_pycache.Console")
     def test_run_cancel_deletion(self, mock_console_cls, mock_get_path, tool, temp_project):
-        """Test user cancelling the deletion."""
+        """Test user cancelling the deletion; scanner should not run."""
         mock_get_path.return_value = str(temp_project)
         
         # Setup mock console to auto-cancel deletion
@@ -86,9 +86,30 @@ class TestCleanPycacheTool:
         mock_console_cls.return_value = mock_console
         mock_console.input.return_value = "n"
         
-        tool.run()
+        with patch("os.walk") as mock_walk:
+            tool.run(yes=False)
+            mock_walk.assert_not_called()
         
-        # Verify that cancellation message was printed
+        # Verify that cancellation message was printed and no 'no folders' info
         mock_console.print.assert_any_call("[red]❌ Operation cancelled.[/]")
-
+        assert not any("No __pycache__" in str(call) for call in mock_console.print.call_args_list)
+    
+    @patch("mytools.tools.clean_pycache.get_project_path")
+    @patch("mytools.tools.clean_pycache.Console")
+    def test_run_with_yes_flag(self, mock_console_cls, mock_get_path, tool, temp_project):
+        """Providing the --yes flag should skip confirmation prompt."""
+        mock_get_path.return_value = str(temp_project)
+        mock_console = MagicMock()
+        mock_console_cls.return_value = mock_console
+        # no need to set input because yes bypasses it
+        # create dummy cache folder
+        pycache_dir = temp_project / "__pycache__"
+        pycache_dir.mkdir()
+        
+        # track calls to rmtree
+        with patch("mytools.tools.clean_pycache.shutil.rmtree") as mock_rmtree:
+            tool.run(yes=True)
+            mock_rmtree.assert_called_once()
+            # ensure no cancellation message printed
+            assert not any("Operation cancelled" in str(call) for call in mock_console.print.call_args_list)
         

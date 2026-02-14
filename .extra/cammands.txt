@@ -57,3 +57,21 @@ Step 2: Pip Cache Clear Karo (Agar Step 1 fail ho)
 
 pip cache purge
 pip install -e .
+
+
+# सामान्य रन – डिफ़ॉल्ट स्तर (INFO)
+mytools list
+
+mytools clean-pycache --debug
+
+# डेवलपमेंट/समस्या निवारण के लिए डीबग मोड
+mytools --debug list
+# या
+mytools -d clean-pycache
+
+# किसी खास लॉग‑लेवल पर सेट करना
+mytools --log-level warning django    # सिर्फ चेतावनी और उससे ऊपर के संदेश
+mytools -l ERROR clean-pycache        # केवल त्रुटियाँ देखें
+
+# दोनों एक साथ भी दे सकते हैं, debug सबसे उच्च प्राथमिकता (उसे TRUE माना जाता है)
+mytools --debug --log-level warning env

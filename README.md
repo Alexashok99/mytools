@@ -53,7 +53,12 @@ pip install -e .
 
 ### **See all available tools**
 ```bash
-mytools list
+$ mytools list
+🔧 Available tools:
+  • clean-pycache – Remove all __pycache__ folders recursively
+  • django – Interactive Django project manager
+  • env – Virtual environment and .env helper
+  ...
 ```
 
 ### **Get help**
@@ -90,8 +95,26 @@ DJANGO MANAGER
 
 ## 📚 Detailed Documentation
 
+### Plugins & Extensions
+
+MyTools is designed to be extendable. Third‑party or custom tools can be
+registered using [Python entry points](https://packaging.python.org/en/latest/specifications/entry-points/)
+under the `mytools.plugins` group. The package dynamically loads every
+tool listed there when it starts.
+
+There is also a `src/mytools/plugins/` package included for convenience —
+it's empty by default but you may drop local plugin modules in there
+and add corresponding entry points during development.
+
+---
+
 ### 🧹 **Clean Python Cache**
 Removes all `__pycache__` directories recursively from current path.
+
+```bash
+mytools clean-pycache --yes          # skip confirmation prompt
+mytools clean-pycache --no-pause     # run without waiting at end
+```
 
 ```bash
 mytools clean-pycache
