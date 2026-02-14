@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mytools"
+version = "0.2.0"
+description = "Modular CLI Tool Suite for Python developers"
+readme = "README.md"
+authors = [
+    {name = "Your Name", email = "you@example.com"},
+]
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+]
+dependencies = [
+    "typer[all]>=0.12",
+    "pydantic>=2.5",
+    "pydantic-settings>=2.1",
+    "python-dotenv>=1.0",
+    "rich>=13.7",          # beautiful console output
+    "importlib-metadata; python_version<'3.8'",
+    "pyperclip>=1.8",
+]
+requires-python = ">=3.9"
+
+[project.scripts]
+mytools = "mytools.cli:app"
+
+[project.entry-points."mytools.plugins"]
+clean-pycache = "mytools.tools.clean_pycache:CleanPycacheTool"
+django = "mytools.tools.django_manager:DjangoTool"
+env = "mytools.tools.env_manager:EnvTool"
+file-ops = "mytools.tools.file_ops:FileOperationsTool"
+file-counter = "mytools.tools.file_counter:FileCounterTool"
+context = "mytools.tools.context_generator:FullContextTool"
+
+# === Naye Django Shortcuts ===
+dj-run = "mytools.tools.django_manager:DjRunTool"
+dj-migrate = "mytools.tools.django_manager:DjMigrateTool"
+dj-makemigrations = "mytools.tools.django_manager:DjMakeMigrationsTool"
+dj-app = "mytools.tools.django_manager:DjAppTool"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mytools*"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers"
+testpaths = [
+    "tests",
+]

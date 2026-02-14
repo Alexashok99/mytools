@@ -1,0 +1,80 @@
+# 1. Verbose output - डिटेल में देखो
+pytest -v
+
+# 2. Stop on first failure
+pytest -x
+
+# 3. Only run failed tests (बहुत useful!)
+pytest --lf
+
+# 4. Last 5 failures
+pytest --ff
+
+# 5. Show print statements
+pytest -s
+
+# 6. Specific marker
+pytest -m "not slow"
+
+# 7. Coverage with missing lines
+pytest --cov=mytools --cov-report=term-missing
+
+
+1. सबसे पहले pytest इंस्टॉल करें:
+# प्रोजेक्ट रूट में जाएँ
+
+cd E:\BIJAY\BIJAY\script\mytools
+
+# pytest इंस्टॉल करें
+
+pip install pytest pytest-cov pytest-mock
+
+2. टेस्ट चलाने के तरीके:
+A. सारे टेस्ट एक साथ चलाएँ:
+
+pytest
+
+B. खास टेस्ट फाइल चलाएँ:
+
+pytest tests/test_tools/test_clean_pycache.py
+
+C. खास टेस्ट फंक्शन चलाएँ:
+
+pytest tests/test_tools/test_clean_pycache.py::test_folder_size
+
+D. Verbose output (डिटेल में):
+
+pytest -v
+
+E. Coverage रिपोर्ट (कितना कोड टेस्ट हुआ):
+
+pytest --cov=mytools --cov-report=html
+
+# फिर htmlcov/index.html खोलें
+
+
+# 1. Tool बनाओ
+touch src/mytools/tools/git_tool.py
+
+# 2. Test बनाओ
+touch tests/test_tools/test_git_tool.py
+
+# 3. Code लिखो और Test लिखो - साथ में!
+
+# Fast check
+pytest -v
+
+# Coverage check
+pytest --cov=mytools
+
+# Specific test
+pytest tests/test_tools/test_clean_pycache.py -v
+
+# अपना खुद का commit hook बनाओ
+echo "pytest" > .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+
+
+pytest tests/test_tools/test_file_ops.py -v
+pytest tests/test_tools/test_context_generator.py -v
+pytest tests/test_tools/test_django_manager.py -v

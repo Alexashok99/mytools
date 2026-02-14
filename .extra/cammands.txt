@@ -1,0 +1,59 @@
+
+pip freeze > requirements.txt
+
+pip uninstall -r requirements.txt -y
+
+pip uninstall mytools -y
+
+
+# साधारण uninstall
+pip uninstall mytools
+
+# Confirm करें 'y'
+
+# पहले देखें क्या-क्या इंस्टॉल है
+pip list | findstr mytools
+pip list | findstr typer
+pip list | findstr rich
+
+# एक-एक करके हटाएँ
+pip uninstall mytools typer rich pydantic pydantic-settings python-dotenv -y
+
+# 1. MyTools हटाएँ
+pip uninstall mytools -y
+
+# 2. Scripts फोल्डर से .exe हटाएँ (अगर रह गया हो)
+del C:\Users\DESKTOP\AppData\Local\Programs\Python\Python314\Scripts\mytools*
+
+# 3. Site-packages से लिंक हटाएँ
+del C:\Users\DESKTOP\AppData\Local\Programs\Python\Python314\Lib\site-packages\mytools*.egg-link
+del C:\Users\DESKTOP\AppData\Local\Programs\Python\Python314\Lib\site-packages\easy-install.pth
+
+
+clean reinstall
+
+pip uninstall mytools -y
+
+# 1. Pytest ka cache delete karein
+Remove-Item -Recurse -Force .pytest_cache -ErrorAction SilentlyContinue
+
+# 2. Purane build folders delete karein
+Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
+
+# 3. .egg-info folder delete karein (zaroori hai fresh metadata ke liye)
+Remove-Item -Recurse -Force src\mytools.egg-info -ErrorAction SilentlyContinue
+
+Get-ChildItem -Path . -Include __pycache__ -Recurse -Directory -Force | Remove-Item -Recurse -Force
+
+pip install -e .
+
+agar koi problem ho to
+Step 1: Bina Cache Ke Install Karo (Most Effective)
+
+pip install -e . --no-cache-dir
+
+Step 2: Pip Cache Clear Karo (Agar Step 1 fail ho)
+
+pip cache purge
+pip install -e .
